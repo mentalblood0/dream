@@ -11,7 +11,7 @@ module Dream
     end
 
     def add(oid : String, tags : Array(String))
-      @sophia << tags.map { |tag| {tag: tag, oid: oid} }
+      @sophia << tags.map { |tag| {tag: tag, oid: oid} } unless @sophia.has_key?({tag: tags.first, oid: oid})
     end
 
     def find(tag : String)
