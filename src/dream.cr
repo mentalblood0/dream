@@ -24,11 +24,7 @@ module Dream
     end
 
     def find(tags : Array(String))
-      if tags.size == 1
-        find tags.first
-      else
-        tags.map { |tag| find tag }.reduce { |acc, cur| acc &= cur }
-      end
+      tags.map { |tag| find tag }.reduce { |acc, cur| acc &= cur }
     end
   end
 end
