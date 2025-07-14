@@ -2,5 +2,5 @@ version: 2.0
 shards:
   sophia:
     git: https://github.com/mentalblood0/sophia.git
-    version: 0.1.0+git.commit.de1415e2d8ff4a1edb72ad90d9afc5f9605b5b15
+    version: 0.1.0+git.commit.4a1f74aa02a5be8f4b470ea870332debbb3b5d3c
 
