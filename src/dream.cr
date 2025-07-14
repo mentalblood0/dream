@@ -35,23 +35,27 @@ module Dream
     # 14 14 14
 
     def find(tags : Array(String), limit : UInt64 = UInt64::MAX)
-      last_oid = ""
       r = [] of String
+
+      cs = [] of DreamEnv::TagsCursor
+      tags.each do |tag|
+        cs << @sophia.cursor({tag: tag, oid: (cs.last.data.not_nil![:oid] rescue "")})
+        return r unless cs.last.next
+      end
+
       until r.size == limit
-        cs = [] of DreamEnv::TagsCursor
-        tags.each do |tag|
-          c = @sophia.cursor(
-            {tag: tag, oid: last_oid},
-            if last_oid == (r.last rescue "")
-              ">"
-            else
-              ">="
-            end)
-          return r unless c.next && c.data.not_nil![:tag] == tag
-          last_oid = c.data.not_nil![:oid]
-          cs << c
+        r << cs.first.data.not_nil![:oid] if cs.all? { |c| c.data.not_nil![:oid] == cs.first.data.not_nil![:oid] }
+        loop do
+          t = cs.first.data.not_nil![:tag]
+          return r unless cs.first.next && cs.first.data.not_nil![:tag] == t
+          break if cs.size == 1 || cs.first.data.not_nil![:oid] >= cs[1].data.not_nil![:oid]
         end
-        r << last_oid if cs.all? { |c| c.data.not_nil![:oid] == last_oid }
+        cs.each_cons_pair do |c1, c2|
+          until c2.data.not_nil![:oid] >= c1.data.not_nil![:oid]
+            t = c2.data.not_nil![:tag]
+            return r unless c2.next && c2.data.not_nil![:tag] == t
+          end
+        end
       end
       r
     end
