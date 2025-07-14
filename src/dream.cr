@@ -34,7 +34,7 @@ module Dream
     # 14 14 10
     # 14 14 14
 
-    def find(tags : Array(String), limit : UInt64 = -1)
+    def find(tags : Array(String), limit : UInt64 = UInt64.MAX)
       last_oid = ""
       r = [] of String
       until r.size == limit
