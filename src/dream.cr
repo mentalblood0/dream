@@ -1,8 +1,11 @@
 require "sophia"
 
 module Dream
+  alias Oid = Tuple(UInt64, UInt64)
+
   Sophia.define_env DreamEnv, {tags: {key: {tag: String,
-                                            oid: String}}}
+                                            oid0: UInt64,
+                                            oid1: UInt64}}}
 
   class Index
     def initialize(path : String, opts : Sophia::H = Sophia::H{"compression"      => "zstd",
@@ -10,30 +13,32 @@ module Dream
       @sophia = DreamEnv.new Sophia::H{"sophia.path" => path}, {tags: opts}
     end
 
-    def add(oid : String, tags : Array(String))
-      @sophia << tags.map { |tag| {tag: tag, oid: oid} } unless @sophia.has_key?({tag: tags.first, oid: oid})
+    def add(oid : Oid, tags : Array(String))
+      @sophia << tags.map { |tag| {tag: tag, oid0: oid[0], oid1: oid[1]} } unless @sophia.has_key?({tag: tags.first, oid0: oid[0], oid1: oid[1]})
     end
 
     def find(tags : Array(String), limit : UInt64 = UInt64::MAX)
-      r = [] of String
+      r = [] of Oid
 
       cs = [] of DreamEnv::TagsCursor
       tags.each do |tag|
-        cs << @sophia.cursor({tag: tag, oid: (cs.last.data.not_nil![:oid] rescue "")})
+        cs << @sophia.cursor({tag: tag, oid0: (cs.last.data.not_nil![:oid0] rescue 0_u64), oid1: (cs.last.data.not_nil![:oid1] rescue 0_u64)})
         return r unless cs.last.next
       end
 
       loop do
-        r << cs.first.data.not_nil![:oid] if cs.all? { |c| c.data.not_nil![:oid] == cs.first.data.not_nil![:oid] }
+        r << {cs.first.data.not_nil![:oid0], cs.first.data.not_nil![:oid1]} if cs.all? { |c| c.data.not_nil![:oid0] == cs.first.data.not_nil![:oid0] && c.data.not_nil![:oid1] == cs.first.data.not_nil![:oid1] }
         return r if r.size == limit
         t = cs.first.data.not_nil![:tag]
         loop do
           return r unless cs.first.next && cs.first.data.not_nil![:tag] == t
-          break if cs.first.data.not_nil![:oid] >= cs.last.data.not_nil![:oid]
+          break if (cs.first.data.not_nil![:oid0] == cs.last.data.not_nil![:oid0] && cs.first.data.not_nil![:oid1] >= cs.last.data.not_nil![:oid1]) ||
+                   (cs.first.data.not_nil![:oid0] > cs.last.data.not_nil![:oid0])
         end
         cs.each_cons_pair do |c1, c2|
           t = c2.data.not_nil![:tag]
-          until c2.data.not_nil![:oid] >= c1.data.not_nil![:oid]
+          until (c2.data.not_nil![:oid0] == c1.data.not_nil![:oid0] && c2.data.not_nil![:oid1] >= c1.data.not_nil![:oid1]) ||
+                (c2.data.not_nil![:oid0] > c1.data.not_nil![:oid0])
             return r unless c2.next && c2.data.not_nil![:tag] == t
           end
         end
@@ -42,7 +47,7 @@ module Dream
     end
 
     def clear
-      @sophia.from({tag: "", oid: ""}) { |rec| @sophia.delete rec }
+      @sophia.from({tag: "", oid0: 0_u64, oid1: 0_u64}) { |rec| @sophia.delete rec }
     end
   end
 end
