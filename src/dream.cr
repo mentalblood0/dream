@@ -23,24 +23,24 @@ module Dream
       cs = [] of DreamEnv::TagsCursor
       tags.each do |tag|
         cs << @sophia.cursor({tag: tag, oid0: (cs.last.data.not_nil![:oid0] rescue 0_u64), oid1: (cs.last.data.not_nil![:oid1] rescue 0_u64)})
-        return r unless cs.last.next
+        return r unless cs.last.next && cs.last.data.not_nil![:tag] == tag
       end
 
       loop do
         r << {cs.first.data.not_nil![:oid0], cs.first.data.not_nil![:oid1]} if cs.all? { |c| c.data.not_nil![:oid0] == cs.first.data.not_nil![:oid0] && c.data.not_nil![:oid1] == cs.first.data.not_nil![:oid1] }
         return r if r.size == limit
-        t = cs.first.data.not_nil![:tag]
         loop do
-          return r unless cs.first.next && cs.first.data.not_nil![:tag] == t
+          return r unless cs.first.next && cs.first.data.not_nil![:tag] == tags.first
           break if (cs.first.data.not_nil![:oid0] == cs.last.data.not_nil![:oid0] && cs.first.data.not_nil![:oid1] >= cs.last.data.not_nil![:oid1]) ||
                    (cs.first.data.not_nil![:oid0] > cs.last.data.not_nil![:oid0])
         end
+        i = 1
         cs.each_cons_pair do |c1, c2|
-          t = c2.data.not_nil![:tag]
           until (c2.data.not_nil![:oid0] == c1.data.not_nil![:oid0] && c2.data.not_nil![:oid1] >= c1.data.not_nil![:oid1]) ||
                 (c2.data.not_nil![:oid0] > c1.data.not_nil![:oid0])
-            return r unless c2.next && c2.data.not_nil![:tag] == t
+            return r unless c2.next && c2.data.not_nil![:tag] == tags[i]
           end
+          i += 1
         end
       end
       r
