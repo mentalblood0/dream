@@ -19,15 +19,13 @@ config[:objects_count].times do
 end
 
 Benchmark.ips do |b|
-  Dream::Index::Strategy.each do |stg|
-    (1..4).each do |tc|
-      limit = 1_u64
-      until limit >= config[:objects_count]
-        b.report "#{stg} searching #{limit} objects by #{tc} tags" do
-          ind.find tags.sample(tc), limit, stg
-        end
-        limit *= 10
+  (1..4).each do |tc|
+    limit = 1_u64
+    until limit >= config[:objects_count]
+      b.report "searching #{limit} objects by #{tc} tags" do
+        ind.find tags.sample(tc), limit
       end
+      limit *= 10
     end
   end
 end
