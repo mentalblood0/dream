@@ -34,30 +34,58 @@ module Dream
     # 14 14 10
     # 14 14 14
 
-    def find(tags : Array(String), limit : UInt64 = UInt64::MAX)
-      r = [] of String
-
-      cs = [] of DreamEnv::TagsCursor
-      tags.each do |tag|
-        cs << @sophia.cursor({tag: tag, oid: (cs.last.data.not_nil![:oid] rescue "")})
-        return r unless cs.last.next
-      end
-
-      until r.size == limit
-        r << cs.first.data.not_nil![:oid] if cs.all? { |c| c.data.not_nil![:oid] == cs.first.data.not_nil![:oid] }
-        loop do
-          t = cs.first.data.not_nil![:tag]
-          return r unless cs.first.next && cs.first.data.not_nil![:tag] == t
-          break if cs.size == 1 || cs.first.data.not_nil![:oid] >= cs[1].data.not_nil![:oid]
-        end
-        cs.each_cons_pair do |c1, c2|
-          until c2.data.not_nil![:oid] >= c1.data.not_nil![:oid]
-            t = c2.data.not_nil![:tag]
-            return r unless c2.next && c2.data.not_nil![:tag] == t
-          end
-        end
+    protected def find(tag : String)
+      r = Set(String).new
+      @sophia.from({tag: tag, oid: ""}) do |t|
+        break unless t[:tag] == tag
+        r << t[:oid]
       end
       r
+    end
+
+    getter next_count = 0_u64
+
+    enum Strategy
+      Intersect = 0
+      Looping   = 1
+    end
+
+    def find(tags : Array(String), limit : UInt64 = UInt64::MAX, strategy : Strategy = Strategy::Looping)
+      case strategy
+      when Strategy::Intersect
+        tags.map { |tag| find tag }.reduce { |acc, cur| acc &= cur }.to_a.sort[0..limit - 1]
+      when Strategy::Looping
+        r = [] of String
+
+        cs = [] of DreamEnv::TagsCursor
+        tags.each do |tag|
+          cs << @sophia.cursor({tag: tag, oid: (cs.last.data.not_nil![:oid] rescue "")})
+          return r unless (@next_count += 1) && cs.last.next
+        end
+
+        until r.size == limit
+          r << cs.first.data.not_nil![:oid] if cs.all? { |c| c.data.not_nil![:oid] == cs.first.data.not_nil![:oid] }
+          t = cs.first.data.not_nil![:tag]
+          loop do
+            return r unless (@next_count += 1) && cs.first.next && cs.first.data.not_nil![:tag] == t
+            break if cs.first.data.not_nil![:oid] >= cs.last.data.not_nil![:oid]
+          end
+          cs.each_cons_pair do |c1, c2|
+            t = c2.data.not_nil![:tag]
+            until c2.data.not_nil![:oid] >= c1.data.not_nil![:oid]
+              return r unless (@next_count += 1) && c2.next && c2.data.not_nil![:tag] == t
+            end
+          end
+        end
+        r
+      else
+        raise "unknown strategy #{strategy}"
+      end
+    end
+
+    def clear
+      @sophia.from({tag: "", oid: ""}) { |rec| @sophia.delete rec }
+      @next_count = 0
     end
   end
 end
