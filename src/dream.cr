@@ -17,6 +17,11 @@ module Dream
       @sophia << tags.map { |tag| {tag: tag, oid0: oid[0], oid1: oid[1]} } unless @sophia.has_key?({tag: tags.first, oid0: oid[0], oid1: oid[1]})
     end
 
+    protected def moe(a : DreamEnv::TagsCursor, b : DreamEnv::TagsCursor)
+      (a.data.not_nil![:oid0] == b.data.not_nil![:oid0] && a.data.not_nil![:oid1] >= b.data.not_nil![:oid1]) ||
+        (a.data.not_nil![:oid0] > b.data.not_nil![:oid0])
+    end
+
     def find(tags : Array(String), limit : UInt64 = UInt64::MAX)
       r = [] of Oid
 
@@ -31,13 +36,11 @@ module Dream
         return r if r.size == limit
         loop do
           return r unless cs.first.next && cs.first.data.not_nil![:tag] == tags.first
-          break if (cs.first.data.not_nil![:oid0] == cs.last.data.not_nil![:oid0] && cs.first.data.not_nil![:oid1] >= cs.last.data.not_nil![:oid1]) ||
-                   (cs.first.data.not_nil![:oid0] > cs.last.data.not_nil![:oid0])
+          break if moe cs.first, cs.last
         end
         i = 1
         cs.each_cons_pair do |c1, c2|
-          until (c2.data.not_nil![:oid0] == c1.data.not_nil![:oid0] && c2.data.not_nil![:oid1] >= c1.data.not_nil![:oid1]) ||
-                (c2.data.not_nil![:oid0] > c1.data.not_nil![:oid0])
+          until moe c2, c1
             return r unless c2.next && c2.data.not_nil![:tag] == tags[i]
           end
           i += 1
