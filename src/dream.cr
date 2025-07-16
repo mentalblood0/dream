@@ -23,8 +23,8 @@ module Dream
     def initialize(path : String, opts : Sophia::H = Sophia::H{"compression"      => "zstd",
                                                                "compaction.cache" => 2_i64 * 1024 * 1024 * 1024})
       @sophia = DreamEnv.new Sophia::H{"sophia.path" => path}, {ii: opts, i2t: opts, t2i: opts, i2o: opts, o2i: opts}
-      @tc = @sophia.cursor({i2ti: UInt32::MAX}, "<=").next.not_nil![:i2ti] rescue 0_u32
-      @oc = @sophia.cursor({i2oi: UInt32::MAX}, "<=").next.not_nil![:i2oi] rescue 0_u32
+      @tc = (@sophia.cursor({i2ti: UInt32::MAX}, "<=").next.not_nil![:i2ti] + 1 rescue 0_u32)
+      @oc = (@sophia.cursor({i2oi: UInt32::MAX}, "<=").next.not_nil![:i2oi] + 1 rescue 0_u32)
     end
 
     def add(object : String, tags : Array(String))
