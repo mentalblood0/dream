@@ -25,10 +25,19 @@ describe Dream do
 
       tags = (1..tags_count).map { Random::DEFAULT.hex 16 }
       objects = Hash.zip (1..objects_count).map { Random::DEFAULT.hex(16) }, (1..objects_count).map { tags.sample(tags_per_object_count) }
+      t2o = {} of String => Set(String)
+      objects.each { |o, tt| tt.each do |t|
+        t2o[t] = Set(String).new unless t2o[t]?
+        t2o[t] << o
+      end }
       searches = (1..searches_count).map { tags.sample 2 }
 
       objects.each { |oid, tags| ind.add oid, tags }
-      searches.each { |tags| ind.find(tags).each { |oid| (objects[oid] & tags).sort.should eq tags.sort } }
+      searches.each do |tags|
+        r = ind.find tags
+        correct = tags.map { |t| t2o[t] }.reduce { |acc, cur| acc &= cur }
+        Set(String).new(r).should eq correct
+      end
     end
   end
 end
