@@ -1,10 +1,6 @@
-require "log"
-
 require "sophia"
 
 module Dream
-  alias Oid = Tuple(UInt64, UInt64)
-
   Sophia.define_env DreamEnv, {ii: {key: {ti: UInt32,
                                           oi: UInt32}},
                                i2t: {key: {i2ti: UInt32},
@@ -28,26 +24,22 @@ module Dream
     end
 
     def add(object : String, tags : Array(String))
-      Log.debug { "add #{object}, #{tags}" }
       return if @sophia.has_key?({o2io: object})
       ltc = @tc
       loc = @oc
       @sophia.transaction do |tx|
-        Log.debug { "<< {o2io: #{object}, o2ii: #{loc}}" }
         tx << {o2io: object, o2ii: loc}
         tx << {i2oi: loc, i2oo: object}
         oi = loc
         loc += 1
         tags.each do |tag|
           ti = (tx[{t2it: tag}]?.not_nil![:t2ii] rescue begin
-            Log.debug { "<< {t2it: #{tag}, t2ii: #{ltc}}" }
             tx << {t2it: tag, t2ii: ltc}
             tx << {i2ti: ltc, i2tt: tag}
             ltc += 1
             ltc - 1
           end)
           break if tx.has_key?({ti: ti, oi: oi})
-          Log.debug { "<< {ti: #{ti}, oi: #{oi}}" }
           tx << {ti: ti, oi: oi}
         end
       end
@@ -56,11 +48,9 @@ module Dream
     end
 
     def find(tags : Array(String), limit : UInt64 = UInt64::MAX)
-      Log.debug { "find #{tags}, #{limit}" }
       r = [] of String
 
       tis = tags.map { |t| @sophia[{t2it: t}]?.not_nil![:t2ii] rescue return r }
-      Log.debug { "tis = #{tis}" }
 
       cs = [] of DreamEnv::IiCursor
       tis.each do |ti|
@@ -70,7 +60,6 @@ module Dream
       end
 
       loop do
-        Log.debug { "cs = #{cs}" }
         r << @sophia[{i2oi: cs.first.data.not_nil![:oi]}]?.not_nil![:i2oo] if cs.all? { |c| c.data.not_nil![:oi] == cs.first.data.not_nil![:oi] }
         return r if r.size == limit
         loop do
