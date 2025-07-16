@@ -14,7 +14,7 @@ tags = Array.new config[:tags_count] { Random::DEFAULT.hex 16 }
 ind = Dream::Index.new config[:path]
 config[:objects_count].times do
   ind.add(
-    {Random::DEFAULT.rand(UInt64), Random::DEFAULT.rand(UInt64)},
+    Random::DEFAULT.hex(16),
     tags[0..Random::DEFAULT.rand(config[:tags_per_object_count]..tags.size.to_u64 - 1)].sample(config[:tags_per_object_count]))
 end
 
