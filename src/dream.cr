@@ -39,7 +39,6 @@ module Dream
             ltc += 1
             ltc - 1
           end)
-          break if tx.has_key?({ti: ti, oi: oi})
           tx << {ti: ti, oi: oi}
         end
       end
