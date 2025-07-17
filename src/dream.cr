@@ -42,7 +42,7 @@ module Dream
             ltc - 1
           end)
           tx << {ti: ti, oi: oi}
-          tx << {ti: ti, c: (tx[{ti: ltc}]?.not_nil![:c] rescue 0_u32) + 1}
+          tx << {ti: ti, c: (tx[{ti: ti}]?.not_nil![:c] rescue 0_u32) + 1}
         end
       end
       @tc = ltc
