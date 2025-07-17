@@ -38,11 +38,11 @@ module Dream
           ti = (tx[{t2it: tag}]?.not_nil![:t2ii] rescue begin
             tx << {t2it: tag, t2ii: ltc}
             tx << {i2ti: ltc, i2tt: tag}
-            tx << {ti: ltc, c: (tx[{ti: ltc}]?.not_nil![:c] rescue 0_u32) + 1}
             ltc += 1
             ltc - 1
           end)
           tx << {ti: ti, oi: oi}
+          tx << {ti: ti, c: (tx[{ti: ltc}]?.not_nil![:c] rescue 0_u32) + 1}
         end
       end
       @tc = ltc
