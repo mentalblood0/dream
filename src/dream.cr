@@ -69,14 +69,14 @@ module Dream
       cs = [] of DreamEnv::IiCursor
 
       i1 = 0
-      i2 = (i1 + 1) % tags.size
+      i2 = 1
       loop do
         if cs.size == tags.size && cs.all? { |c| c.data.not_nil![:oi] == cs.first.data.not_nil![:oi] }
           r << @sophia[{i2oi: cs.first.data.not_nil![:oi]}]?.not_nil![:i2oo]
           return r if r.size == limit
           return r unless cs.first.next && cs.first.data.not_nil![:ti] == tis.first
           i1 = 0
-          i2 = (i1 + 1) % tags.size
+          i2 = 1
         end
 
         if cs.size < tags.size && cs.size <= i1
