@@ -60,11 +60,8 @@ module Dream
         return r
       end
 
-      tis = tags
-        .map { |t| @sophia[{t2it: t}]?.not_nil![:t2ii] rescue return r }
-        .map { |ti| {ti, @sophia[{ti: ti}]?.not_nil![:c]} }
-        .sort_by { |ti, c| c }
-        .map { |ti, c| ti }
+      tis = tags.map { |t| @sophia[{t2it: t}]?.not_nil![:t2ii] rescue return r }
+      tis.sort_by! { |ti| @sophia[{ti: ti}]?.not_nil![:c] }
 
       cs = [] of DreamEnv::IiCursor
 
