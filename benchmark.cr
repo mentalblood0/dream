@@ -11,7 +11,11 @@ config = NamedTuple(
 
 tags = Array.new config[:tags_count] { Random::DEFAULT.hex 16 }
 
-ind = Dream::Index.new config[:path]
+opts = Sophia::H{"compression"      => "zstd",
+                 "compaction.cache" => 2_i64 * 1024 * 1024 * 1024}
+ind = Dream::Index.new Dream::Env.new Sophia::H{"sophia.path" => config[:path]},
+  {ii: Sophia::H.new, i2t: opts, t2i: opts, i2o: opts, o2i: opts, c: Sophia::H.new}
+
 config[:objects_count].times do
   ind.add(
     Random::DEFAULT.hex(16),
@@ -23,7 +27,7 @@ Benchmark.ips do |b|
     limit = 1_u32
     until limit >= config[:objects_count]
       b.report "searching #{limit} objects by #{tc} tags" do
-        ind.find tags.sample(tc), limit
+        ind.find tags.sample(tc), limit: limit
       end
       limit *= 10
     end

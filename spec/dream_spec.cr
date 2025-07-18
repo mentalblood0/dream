@@ -5,7 +5,11 @@ require "../src/dream.cr"
 
 describe Dream do
   describe "Index" do
-    ind = Dream::Index.new "/tmp/dream"
+    opts = Sophia::H{"compression"      => "zstd",
+                     "compaction.cache" => 2_i64 * 1024 * 1024 * 1024}
+    ind = Dream::Index.new Dream::Env.new Sophia::H{"sophia.path" => "/tmp/dream"},
+      {ii: Sophia::H.new, i2t: opts, t2i: opts, i2o: opts, o2i: opts, c: Sophia::H.new}
+
     it "simple test" do
       ind.add("o1", ["a"])
       ind.add("o2", ["a", "b"])

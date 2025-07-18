@@ -1,26 +1,24 @@
 require "sophia"
 
 module Dream
-  Sophia.define_env DreamEnv, {ii: {key: {ti: UInt32,
-                                          oi: UInt32}},
-                               i2t: {key: {i2ti: UInt32},
-                                     value: {i2tt: String}},
-                               t2i: {key: {t2it: String},
-                                     value: {t2ii: UInt32}},
-                               i2o: {key: {i2oi: UInt32},
-                                     value: {i2oo: String}},
-                               o2i: {key: {o2io: String},
-                                     value: {o2ii: UInt32}},
-                               c: {key: {ti: UInt32},
-                                   value: {c: UInt32}}}
+  Sophia.define_env Env, {ii: {key: {ti: UInt32,
+                                     oi: UInt32}},
+                          i2t: {key: {i2ti: UInt32},
+                                value: {i2tt: String}},
+                          t2i: {key: {t2it: String},
+                                value: {t2ii: UInt32}},
+                          i2o: {key: {i2oi: UInt32},
+                                value: {i2oo: String}},
+                          o2i: {key: {o2io: String},
+                                value: {o2ii: UInt32}},
+                          c: {key: {ti: UInt32},
+                              value: {c: UInt32}}}
 
   class Index
     @tc : UInt32
     @oc : UInt32
 
-    def initialize(path : String, opts : Sophia::H = Sophia::H{"compression"      => "zstd",
-                                                               "compaction.cache" => 2_i64 * 1024 * 1024 * 1024})
-      @sophia = DreamEnv.new Sophia::H{"sophia.path" => path}, {ii: opts, i2t: opts, t2i: opts, i2o: opts, o2i: opts, c: opts}
+    def initialize(@sophia : Env)
       @tc = (@sophia.cursor({i2ti: UInt32::MAX}, "<=").next.not_nil![:i2ti] rescue 0_u32) + 1
       @oc = (@sophia.cursor({i2oi: UInt32::MAX}, "<=").next.not_nil![:i2oi] rescue 0_u32) + 1
     end
@@ -41,14 +39,14 @@ module Dream
         tx << {i2oi: oi, i2oo: object}
         @oc += 1
         tags.each do |tag|
-          ti = (tx[{t2it: tag}]?.not_nil![:t2ii] rescue begin
+          ti = (@sophia[{t2it: tag}]?.not_nil![:t2ii] rescue begin
             tx << {t2it: tag, t2ii: @tc}
             tx << {i2ti: @tc, i2tt: tag}
             @tc += 1
             @tc - 1
           end)
           tx << {ti: ti, oi: oi}
-          tx << {ti: ti, c: (tx[{ti: ti}]?.not_nil![:c] rescue 0_u32) + 1}
+          tx << {ti: ti, c: (@sophia[{ti: ti}]?.not_nil![:c] rescue 0_u32) + 1}
         end
       end
     end
@@ -77,7 +75,7 @@ module Dream
       pis = present.map { |t| @sophia[{t2it: t}]?.not_nil![:t2ii] rescue return r }
       pis.sort_by! { |ti| @sophia[{ti: ti}]?.not_nil![:c] }
 
-      cs = [] of DreamEnv::IiCursor
+      cs = [] of Dream::Env::IiCursor
 
       i1 = 0
       i2 = 1
