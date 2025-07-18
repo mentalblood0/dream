@@ -35,26 +35,22 @@ module Dream
 
     def add(object : String, tags : Array(String))
       return if @sophia.has_key?({o2io: object})
-      ltc = @tc
-      loc = @oc
       @sophia.transaction do |tx|
-        tx << {o2io: object, o2ii: loc}
-        tx << {i2oi: loc, i2oo: object}
-        oi = loc
-        loc += 1
+        oi = @oc
+        tx << {o2io: object, o2ii: oi}
+        tx << {i2oi: oi, i2oo: object}
+        @oc += 1
         tags.each do |tag|
           ti = (tx[{t2it: tag}]?.not_nil![:t2ii] rescue begin
-            tx << {t2it: tag, t2ii: ltc}
-            tx << {i2ti: ltc, i2tt: tag}
-            ltc += 1
-            ltc - 1
+            tx << {t2it: tag, t2ii: @tc}
+            tx << {i2ti: @tc, i2tt: tag}
+            @tc += 1
+            @tc - 1
           end)
           tx << {ti: ti, oi: oi}
           tx << {ti: ti, c: (tx[{ti: ti}]?.not_nil![:c] rescue 0_u32) + 1}
         end
       end
-      @tc = ltc
-      @oc = loc
     end
 
     def find(tags : Array(String), limit : UInt32 = UInt32::MAX, from : String? = nil)
