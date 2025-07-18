@@ -21,6 +21,7 @@ describe Dream do
       ind.find(["a"], ["c"]).should eq ["o1", "o2"]
       ind.find(["b"], ["a"]).should eq [] of String
       ind.find(["b"], ["c"]).should eq ["o2"]
+      ind.find(["a", "b"], ["c"]).should eq ["o2"]
     end
     it "generative test" do
       tags_count = 20

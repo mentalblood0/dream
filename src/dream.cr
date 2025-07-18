@@ -82,9 +82,11 @@ module Dream
       i1 = 0
       i2 = 1
       loop do
-        if cs.size == present.size && cs.all? { |c| c.data.not_nil![:oi] == cs.first.data.not_nil![:oi] } && ais.all? { |ai| !@sophia.has_key?({ti: ai, oi: cs.first.data.not_nil![:oi]}) }
-          r << @sophia[{i2oi: cs.first.data.not_nil![:oi]}]?.not_nil![:i2oo]
-          return r if r.size == limit
+        if cs.size == present.size && cs.all? { |c| c.data.not_nil![:oi] == cs.first.data.not_nil![:oi] }
+          if ais.all? { |ai| !@sophia.has_key?({ti: ai, oi: cs.first.data.not_nil![:oi]}) }
+            r << @sophia[{i2oi: cs.first.data.not_nil![:oi]}]?.not_nil![:i2oo]
+            return r if r.size == limit
+          end
           return r unless cs.first.next && cs.first.data.not_nil![:ti] == pis.first
           i1 = 0
           i2 = 1
