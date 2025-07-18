@@ -25,6 +25,14 @@ module Dream
       @oc = (@sophia.cursor({i2oi: UInt32::MAX}, "<=").next.not_nil![:i2oi] rescue 0_u32) + 1
     end
 
+    def tags_count
+      @tc - 1
+    end
+
+    def objects_count
+      @oc - 1
+    end
+
     def add(object : String, tags : Array(String))
       return if @sophia.has_key?({o2io: object})
       ltc = @tc
