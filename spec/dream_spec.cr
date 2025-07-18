@@ -10,12 +10,17 @@ describe Dream do
       ind.add("o1", ["a"])
       ind.add("o2", ["a", "b"])
       ind.add("o3", ["a", "b", "c"])
-      ind.find(["a", "b", "c"], 2).should eq ["o3"]
+      ind.find(["a", "b", "c"], limit: 2).should eq ["o3"]
       ind.find(["a", "b"]).should eq ["o2", "o3"]
-      ind.find(["a", "b"], 1).should eq ["o2"]
+      ind.find(["a", "b"], limit: 1).should eq ["o2"]
       ind.find(["a"]).should eq ["o1", "o2", "o3"]
-      ind.find(["a"], 2).should eq ["o1", "o2"]
-      ind.find(["a"], 1).should eq ["o1"]
+      ind.find(["a"], limit: 2).should eq ["o1", "o2"]
+      ind.find(["a"], limit: 1).should eq ["o1"]
+      ind.find(["a"], ["a"]).should eq [] of String
+      ind.find(["a"], ["b"]).should eq ["o1"]
+      ind.find(["a"], ["c"]).should eq ["o1", "o2"]
+      ind.find(["b"], ["a"]).should eq [] of String
+      ind.find(["b"], ["c"]).should eq ["o2"]
     end
     it "generative test" do
       tags_count = 20
@@ -39,7 +44,7 @@ describe Dream do
         r.should eq correct
 
         r = [] of String
-        until (rp = ind.find(tags, 2, (r.last rescue nil))).empty?
+        until (rp = ind.find(tags, limit: 2, from: (r.last rescue nil))).empty?
           r += rp
         end
         r.sort.should eq correct
