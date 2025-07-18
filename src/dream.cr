@@ -21,8 +21,8 @@ module Dream
     def initialize(path : String, opts : Sophia::H = Sophia::H{"compression"      => "zstd",
                                                                "compaction.cache" => 2_i64 * 1024 * 1024 * 1024})
       @sophia = DreamEnv.new Sophia::H{"sophia.path" => path}, {ii: opts, i2t: opts, t2i: opts, i2o: opts, o2i: opts, c: opts}
-      @tc = (@sophia.cursor({i2ti: UInt32::MAX}, "<=").next.not_nil![:i2ti] + 1 rescue 0_u32)
-      @oc = (@sophia.cursor({i2oi: UInt32::MAX}, "<=").next.not_nil![:i2oi] + 1 rescue 0_u32)
+      @tc = (@sophia.cursor({i2ti: UInt32::MAX}, "<=").next.not_nil![:i2ti] rescue 0_u32) + 1
+      @oc = (@sophia.cursor({i2oi: UInt32::MAX}, "<=").next.not_nil![:i2oi] rescue 0_u32) + 1
     end
 
     def add(object : String, tags : Array(String))
@@ -49,11 +49,17 @@ module Dream
       @oc = loc
     end
 
-    def find(tags : Array(String), limit : UInt32 = UInt32::MAX)
+    def find(tags : Array(String), limit : UInt32 = UInt32::MAX, from : String? = nil)
+      fromi = if from
+                @sophia[{o2io: from}]?.not_nil![:o2ii]
+              else
+                nil
+              end
+
       r = [] of String
       if tags.size == 1
         ti = @sophia[{t2it: tags.first}]?.not_nil![:t2ii] rescue return r
-        @sophia.from({ti: ti, oi: 0_u32}) do |ii|
+        @sophia.from({ti: ti, oi: (fromi.not_nil! rescue 0_u32)}, ">") do |ii|
           break if r.size == limit || ii[:ti] != ti
           r << @sophia[{i2oi: ii[:oi]}]?.not_nil![:i2oo]
         end
@@ -77,14 +83,18 @@ module Dream
         end
 
         if cs.size < tags.size && cs.size <= i1
-          c = @sophia.cursor({ti: tis[i1], oi: (cs.last.data.not_nil![:oi] rescue 0_u32)})
+          if i1 == 0
+            c = @sophia.cursor({ti: tis[i1], oi: (fromi.not_nil! rescue 0_u32)}, ">")
+          else
+            c = @sophia.cursor({ti: tis[i1], oi: cs.last.data.not_nil![:oi]})
+          end
           return r unless c.next && c.data.not_nil![:ti] == tis[i1]
           cs << c
         end
         c1 = cs[i1]
 
         if cs.size < tags.size && cs.size <= i2
-          c = @sophia.cursor({ti: tis[i2], oi: (cs.last.data.not_nil![:oi] rescue 0_u32)})
+          c = @sophia.cursor({ti: tis[i2], oi: cs.last.data.not_nil![:oi]})
           return r unless c.next && c.data.not_nil![:ti] == tis[i2]
           cs << c
         end

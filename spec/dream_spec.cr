@@ -34,9 +34,15 @@ describe Dream do
 
       objects.each { |oid, tags| ind.add oid, tags }
       searches.each do |tags|
-        r = ind.find tags
-        correct = tags.map { |t| t2o[t] }.reduce { |acc, cur| acc &= cur }
-        Set(String).new(r).should eq correct
+        r = ind.find(tags).sort
+        correct = tags.map { |t| t2o[t] }.reduce { |acc, cur| acc &= cur }.to_a.sort
+        r.should eq correct
+
+        r = [] of String
+        until (rp = ind.find(tags, 2, (r.last rescue nil))).empty?
+          r += rp
+        end
+        r.sort.should eq correct
       end
     end
   end
