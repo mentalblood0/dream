@@ -1,27 +1,19 @@
-# dream
+# 🧶 dream
 
-TODO: Write a description here
+Tagged objects index and search engine with advanced algorithm
 
 ## Installation
 
-TODO: Write installation instructions here
+1. Add the dependency to your `shard.yml`:
+
+   ```yaml
+   dependencies:
+     dream:
+       github: mentalblood0/dream
+   ```
+
+2. Run `shards install`
 
 ## Usage
 
-TODO: Write usage instructions here
-
-## Development
-
-TODO: Write development instructions here
-
-## Contributing
-
-1. Fork it (<https://github.com/your-github-user/dream/fork>)
-2. Create your feature branch (`git checkout -b my-new-feature`)
-3. Commit your changes (`git commit -am 'Add some feature'`)
-4. Push to the branch (`git push origin my-new-feature`)
-5. Create a new Pull Request
-
-## Contributors
-
-- [mentalblood0](https://github.com/your-github-user) - creator and maintainer
+See spec/dream_spec.cr
