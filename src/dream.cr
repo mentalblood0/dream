@@ -32,12 +32,13 @@ module Dream
     end
 
     def add(object : String, tags : Array(String))
-      return if @sophia.has_key?({o2io: object})
       @sophia.transaction do |tx|
-        oi = @oc
-        tx << {o2io: object, o2ii: oi}
-        tx << {i2oi: oi, i2oo: object}
-        @oc += 1
+        oi = (@sophia[{o2io: object}]?.not_nil![:o2ii] rescue begin
+          tx << {o2io: object, o2ii: @oc}
+          tx << {i2oi: @oc, i2oo: object}
+          @oc += 1
+          @oc - 1
+        end)
         tags.each do |tag|
           ti = (@sophia[{t2it: tag}]?.not_nil![:t2ii] rescue begin
             tx << {t2it: tag, t2ii: @tc}
