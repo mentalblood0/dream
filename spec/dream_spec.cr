@@ -8,24 +8,36 @@ describe Dream do
     opts = Sophia::H{"compression"      => "zstd",
                      "compaction.cache" => 2_i64 * 1024 * 1024 * 1024}
     ind = Dream::Index.new Dream::Env.new Sophia::H{"sophia.path" => "/tmp/dream"},
-      {ii: Sophia::H.new, i2t: opts, t2i: opts, i2o: opts, o2i: opts, c: Sophia::H.new}
+      {t2o: Sophia::H.new, o2t: Sophia::H.new, i2t: opts, t2i: opts, i2o: opts, o2i: opts, c: Sophia::H.new}
 
     it "simple test" do
       ind.add("o1", ["a"])
       ind.add("o2", ["a", "b"])
       ind.add("o3", ["a", "b", "c"])
+
       ind.find(["a", "b", "c"], limit: 2).should eq ["o3"]
       ind.find(["a", "b"]).should eq ["o2", "o3"]
       ind.find(["a", "b"], limit: 1).should eq ["o2"]
       ind.find(["a"]).should eq ["o1", "o2", "o3"]
       ind.find(["a"], limit: 2).should eq ["o1", "o2"]
       ind.find(["a"], limit: 1).should eq ["o1"]
+
       ind.find(["a"], ["a"]).should eq [] of String
       ind.find(["a"], ["b"]).should eq ["o1"]
       ind.find(["a"], ["c"]).should eq ["o1", "o2"]
       ind.find(["b"], ["a"]).should eq [] of String
       ind.find(["b"], ["c"]).should eq ["o2"]
       ind.find(["a", "b"], ["c"]).should eq ["o2"]
+
+      ind.delete "o3", ["a", "c"]
+      ind.find(["a"]).should eq ["o1", "o2"]
+      ind.find(["b"]).should eq ["o2", "o3"]
+      ind.find(["c"]).should eq [] of String
+
+      ind.delete "o2"
+      ind.find(["a"]).should eq ["o1"]
+      ind.find(["b"]).should eq ["o3"] of String
+      ind.find(["c"]).should eq [] of String
     end
     it "generative test" do
       tags_count = 20
