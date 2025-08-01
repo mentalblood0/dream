@@ -64,8 +64,10 @@ module Dream
       oi = @env[{o2io: object}]?.not_nil![:o2ii] rescue return
       @env.transaction do |tx|
         @env.from({o2to: oi, o2tt: 0_u32}) do |o2t|
-          tx.delete({t2ot: o2t[:o2tt], t2oo: oi})
-          tx.delete({o2to: oi, o2tt: o2t[:o2tt]})
+          ti = o2t[:o2tt]
+          tx.delete({t2ot: ti, t2oo: oi})
+          tx.delete({o2to: oi, o2tt: ti})
+          tx << {ti: ti, c: (@env[{ti: ti}]?.not_nil![:c] - 1 rescue 0_u32)}
         end
         tx.delete({o2io: object})
         tx.delete({i2oi: oi})
@@ -79,6 +81,7 @@ module Dream
           ti = @env[{t2it: t}]?.not_nil![:t2ii] rescue next
           tx.delete({t2ot: ti, t2oo: oi})
           tx.delete({o2to: oi, o2tt: ti})
+          tx << {ti: ti, c: (@env[{ti: ti}]?.not_nil![:c] - 1 rescue 0_u32)}
         end
       end
     end
