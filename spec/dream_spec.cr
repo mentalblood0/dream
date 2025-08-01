@@ -5,10 +5,26 @@ require "../src/dream.cr"
 
 describe Dream do
   describe "Index" do
-    opts = Sophia::H{"compression"      => "zstd",
-                     "compaction.cache" => 2_i64 * 1024 * 1024 * 1024}
-    ind = Dream::Index.new Dream::Env.new Sophia::H{"sophia.path" => "/tmp/dream"},
-      {t2o: Sophia::H.new, o2t: Sophia::H.new, i2t: opts, t2i: opts, i2o: opts, o2i: opts, c: Sophia::H.new}
+    env = Dream::Env.from_yaml <<-YAML
+    sophia:
+      path: /tmp/dream
+    db:
+      t2o: &ddbs
+        compression: zstd
+        compaction:
+          cache: 2_000_000_000
+      o2t:
+        <<: *ddbs
+      i2t:
+        <<: *ddbs
+      t2i:
+        <<: *ddbs
+      i2o:
+        <<: *ddbs
+      o2i:
+        <<: *ddbs
+    YAML
+    ind = Dream::Index.new env
 
     it "simple test" do
       ind.add("o1", ["a"])

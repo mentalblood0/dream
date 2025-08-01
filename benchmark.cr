@@ -11,10 +11,25 @@ config = NamedTuple(
 
 tags = Array.new config[:tags_count] { Random::DEFAULT.hex 16 }
 
-opts = Sophia::H{"compression"      => "zstd",
-                 "compaction.cache" => 2_i64 * 1024 * 1024 * 1024}
-env = Dream::Env.new Sophia::H{"sophia.path" => "/tmp/dream"},
-  {t2o: opts, o2t: opts, i2t: opts, t2i: opts, i2o: opts, o2i: opts, c: Sophia::H.new}
+env = Dream::Env.from_yaml <<-YAML
+sophia:
+  path: /tmp/dream
+db:
+  t2o: &ddbs
+    compression: zstd
+    compaction:
+      cache: 2_000_000_000
+  o2t:
+    <<: *ddbs
+  i2t:
+    <<: *ddbs
+  t2i:
+    <<: *ddbs
+  i2o:
+    <<: *ddbs
+  o2i:
+    <<: *ddbs
+YAML
 ind = Dream::Index.new env
 
 config[:objects_count].times do
