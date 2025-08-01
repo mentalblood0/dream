@@ -1,3 +1,5 @@
+require "yaml"
+
 require "sophia"
 
 module Dream
@@ -17,24 +19,35 @@ module Dream
                               value: {c: UInt32}}}
 
   class Index
-    @tc : UInt32
-    @oc : UInt32
+    include YAML::Serializable
+    include YAML::Serializable::Strict
 
-    def initialize(@sophia : Env)
-      @tc = (@sophia.cursor({i2ti: UInt32::MAX}, "<=").next.not_nil![:i2ti] rescue 0_u32) + 1
-      @oc = (@sophia.cursor({i2oi: UInt32::MAX}, "<=").next.not_nil![:i2oi] rescue 0_u32) + 1
+    getter env : Env
+
+    @[YAML::Field(ignore: true)]
+    @tc : UInt32 = 0_u32
+    @[YAML::Field(ignore: true)]
+    @oc : UInt32 = 0_u32
+
+    def after_initialize
+      initialize @env
+    end
+
+    def initialize(@env : Env)
+      @tc = (@env.cursor({i2ti: UInt32::MAX}, "<=").next.not_nil![:i2ti] rescue 0_u32) + 1
+      @oc = (@env.cursor({i2oi: UInt32::MAX}, "<=").next.not_nil![:i2oi] rescue 0_u32) + 1
     end
 
     def add(object : String, tags : Array(String))
-      @sophia.transaction do |tx|
-        oi = (@sophia[{o2io: object}]?.not_nil![:o2ii] rescue begin
+      @env.transaction do |tx|
+        oi = (@env[{o2io: object}]?.not_nil![:o2ii] rescue begin
           tx << {o2io: object, o2ii: @oc}
           tx << {i2oi: @oc, i2oo: object}
           @oc += 1
           @oc - 1
         end)
         tags.each do |tag|
-          ti = (@sophia[{t2it: tag}]?.not_nil![:t2ii] rescue begin
+          ti = (@env[{t2it: tag}]?.not_nil![:t2ii] rescue begin
             tx << {t2it: tag, t2ii: @tc}
             tx << {i2ti: @tc, i2tt: tag}
             @tc += 1
@@ -42,15 +55,15 @@ module Dream
           end)
           tx << {t2ot: ti, t2oo: oi}
           tx << {o2to: oi, o2tt: ti}
-          tx << {ti: ti, c: (@sophia[{ti: ti}]?.not_nil![:c] rescue 0_u32) + 1}
+          tx << {ti: ti, c: (@env[{ti: ti}]?.not_nil![:c] rescue 0_u32) + 1}
         end
       end
     end
 
     def delete(object : String)
-      oi = @sophia[{o2io: object}]?.not_nil![:o2ii] rescue return
-      @sophia.transaction do |tx|
-        @sophia.from({o2to: oi, o2tt: 0_u32}) do |o2t|
+      oi = @env[{o2io: object}]?.not_nil![:o2ii] rescue return
+      @env.transaction do |tx|
+        @env.from({o2to: oi, o2tt: 0_u32}) do |o2t|
           tx.delete({t2ot: o2t[:o2tt], t2oo: oi})
           tx.delete({o2to: oi, o2tt: o2t[:o2tt]})
         end
@@ -60,10 +73,10 @@ module Dream
     end
 
     def delete(object : String, tags : Array(String))
-      oi = @sophia[{o2io: object}]?.not_nil![:o2ii] rescue return
-      @sophia.transaction do |tx|
+      oi = @env[{o2io: object}]?.not_nil![:o2ii] rescue return
+      @env.transaction do |tx|
         tags.each do |t|
-          ti = @sophia[{t2it: t}]?.not_nil![:t2ii] rescue next
+          ti = @env[{t2it: t}]?.not_nil![:t2ii] rescue next
           tx.delete({t2ot: ti, t2oo: oi})
           tx.delete({o2to: oi, o2tt: ti})
         end
@@ -72,27 +85,27 @@ module Dream
 
     def find(present : Array(String), absent : Array(String) = [] of String, limit : UInt32 = UInt32::MAX, from : String? = nil)
       fromi = if from
-                @sophia[{o2io: from}]?.not_nil![:o2ii]
+                @env[{o2io: from}]?.not_nil![:o2ii]
               else
                 nil
               end
 
-      ais = absent.compact_map { |t| @sophia[{t2it: t}]?.not_nil![:t2ii] rescue nil }
-      ais.sort_by! { |ti| @sophia[{ti: ti}]?.not_nil![:c] }
+      ais = absent.compact_map { |t| @env[{t2it: t}]?.not_nil![:t2ii] rescue nil }
+      ais.sort_by! { |ti| @env[{ti: ti}]?.not_nil![:c] }
       ais.reverse!
 
       r = [] of String
       if present.size == 1
-        ti = @sophia[{t2it: present.first}]?.not_nil![:t2ii] rescue return r
-        @sophia.from({t2ot: ti, t2oo: (fromi.not_nil! rescue 0_u32)}, ">") do |t2o|
+        ti = @env[{t2it: present.first}]?.not_nil![:t2ii] rescue return r
+        @env.from({t2ot: ti, t2oo: (fromi.not_nil! rescue 0_u32)}, ">") do |t2o|
           break if r.size == limit || t2o[:t2ot] != ti
-          r << @sophia[{i2oi: t2o[:t2oo]}]?.not_nil![:i2oo] if ais.all? { |ai| !@sophia.has_key?({t2ot: ai, t2oo: t2o[:t2oo]}) }
+          r << @env[{i2oi: t2o[:t2oo]}]?.not_nil![:i2oo] if ais.all? { |ai| !@env.has_key?({t2ot: ai, t2oo: t2o[:t2oo]}) }
         end
         return r
       end
 
-      pis = present.map { |t| @sophia[{t2it: t}]?.not_nil![:t2ii] rescue return r }
-      pis.sort_by! { |ti| @sophia[{ti: ti}]?.not_nil![:c] }
+      pis = present.map { |t| @env[{t2it: t}]?.not_nil![:t2ii] rescue return r }
+      pis.sort_by! { |ti| @env[{ti: ti}]?.not_nil![:c] }
 
       cs = [] of Dream::Env::T2oCursor
 
@@ -100,8 +113,8 @@ module Dream
       i2 = 1
       loop do
         if cs.size == present.size && cs.all? { |c| c.data.not_nil![:t2oo] == cs.first.data.not_nil![:t2oo] }
-          if ais.all? { |ai| !@sophia.has_key?({t2ot: ai, t2oo: cs.first.data.not_nil![:t2oo]}) }
-            r << @sophia[{i2oi: cs.first.data.not_nil![:t2oo]}]?.not_nil![:i2oo]
+          if ais.all? { |ai| !@env.has_key?({t2ot: ai, t2oo: cs.first.data.not_nil![:t2oo]}) }
+            r << @env[{i2oi: cs.first.data.not_nil![:t2oo]}]?.not_nil![:i2oo]
             return r if r.size == limit
           end
           return r unless cs.first.next && cs.first.data.not_nil![:t2ot] == pis.first
@@ -111,9 +124,9 @@ module Dream
 
         if cs.size < present.size && cs.size <= i1
           if i1 == 0
-            c = @sophia.cursor({t2ot: pis[i1], t2oo: (fromi.not_nil! rescue 0_u32)}, ">")
+            c = @env.cursor({t2ot: pis[i1], t2oo: (fromi.not_nil! rescue 0_u32)}, ">")
           else
-            c = @sophia.cursor({t2ot: pis[i1], t2oo: cs.last.data.not_nil![:t2oo]})
+            c = @env.cursor({t2ot: pis[i1], t2oo: cs.last.data.not_nil![:t2oo]})
           end
           return r unless c.next && c.data.not_nil![:t2ot] == pis[i1]
           cs << c
@@ -121,7 +134,7 @@ module Dream
         c1 = cs[i1]
 
         if cs.size < present.size && cs.size <= i2
-          c = @sophia.cursor({t2ot: pis[i2], t2oo: cs.last.data.not_nil![:t2oo]})
+          c = @env.cursor({t2ot: pis[i2], t2oo: cs.last.data.not_nil![:t2oo]})
           return r unless c.next && c.data.not_nil![:t2ot] == pis[i2]
           cs << c
         end

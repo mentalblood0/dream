@@ -5,26 +5,27 @@ require "../src/dream.cr"
 
 describe Dream do
   describe "Index" do
-    env = Dream::Env.from_yaml <<-YAML
-    sophia:
-      path: /tmp/dream
-    db:
-      t2o: &ddbs
-        compression: zstd
-        compaction:
-          cache: 2_000_000_000
-      o2t:
-        <<: *ddbs
-      i2t:
-        <<: *ddbs
-      t2i:
-        <<: *ddbs
-      i2o:
-        <<: *ddbs
-      o2i:
-        <<: *ddbs
+    ind = Dream::Index.from_yaml <<-YAML
+    env:
+      opts:
+        sophia:
+          path: /tmp/dream
+        db:
+          t2o: &ddbs
+            compression: zstd
+            compaction:
+              cache: 2_000_000_000
+          o2t:
+            *ddbs
+          i2t:
+            *ddbs
+          t2i:
+            *ddbs
+          i2o:
+            *ddbs
+          o2i:
+            *ddbs
     YAML
-    ind = Dream::Index.new env
 
     it "simple test" do
       ind.add("o1", ["a"])
