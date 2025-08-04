@@ -64,6 +64,7 @@ module Dream
       oi = @env[{o2io: object}]?.not_nil![:o2ii] rescue return
       @env.transaction do |tx|
         @env.from({o2to: oi, o2tt: 0_u32}) do |o2t|
+          break unless o2t[:o2to] == oi
           ti = o2t[:o2tt]
           tx.delete({t2ot: ti, t2oo: oi})
           tx.delete({o2to: oi, o2tt: ti})
