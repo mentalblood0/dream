@@ -12,8 +12,8 @@ module Dream
                           t2i: {key: {t2it: String},
                                 value: {t2ii: UInt32}},
                           i2o: {key: {i2oi: UInt32},
-                                value: {i2oo: String}},
-                          o2i: {key: {o2io: String},
+                                value: {i2oo: Bytes}},
+                          o2i: {key: {o2io: Bytes},
                                 value: {o2ii: UInt32}},
                           c: {key: {ti: UInt32},
                               value: {c: UInt32}}}
@@ -38,7 +38,7 @@ module Dream
       @oc = (@env.cursor({i2oi: UInt32::MAX}, "<=").next.not_nil![:i2oi] rescue 0_u32) + 1
     end
 
-    def add(object : String, tags : Array(String))
+    def add(object : Bytes, tags : Array(String))
       @env.transaction do |tx|
         oi = (@env[{o2io: object}]?.not_nil![:o2ii] rescue begin
           tx << {o2io: object, o2ii: @oc}
@@ -60,7 +60,7 @@ module Dream
       end
     end
 
-    def delete(object : String)
+    def delete(object : Bytes)
       oi = @env[{o2io: object}]?.not_nil![:o2ii] rescue return
       @env.transaction do |tx|
         @env.from({o2to: oi, o2tt: 0_u32}) do |o2t|
@@ -75,7 +75,7 @@ module Dream
       end
     end
 
-    def delete(object : String, tags : Array(String))
+    def delete(object : Bytes, tags : Array(String))
       oi = @env[{o2io: object}]?.not_nil![:o2ii] rescue return
       @env.transaction do |tx|
         tags.each do |t|
@@ -87,7 +87,7 @@ module Dream
       end
     end
 
-    def find(present : Array(String), absent : Array(String) = [] of String, limit : UInt32 = UInt32::MAX, from : String? = nil)
+    def find(present : Array(String), absent : Array(String) = [] of String, limit : UInt32 = UInt32::MAX, from : Bytes? = nil)
       fromi = if from
                 @env[{o2io: from}]?.not_nil![:o2ii]
               else
@@ -98,12 +98,12 @@ module Dream
       ais.sort_by! { |ti| @env[{ti: ti}]?.not_nil![:c] }
       ais.reverse!
 
-      r = [] of String
+      r = [] of Bytes
       if present.size == 1
         ti = @env[{t2it: present.first}]?.not_nil![:t2ii] rescue return r
         @env.from({t2ot: ti, t2oo: (fromi.not_nil! rescue 0_u32)}, ">") do |t2o|
           break if r.size == limit || t2o[:t2ot] != ti
-          r << @env[{i2oi: t2o[:t2oo]}]?.not_nil![:i2oo] if ais.all? { |ai| !@env.has_key?({t2ot: ai, t2oo: t2o[:t2oo]}) }
+          r << @env[{i2oi: t2o[:t2oo]}]?.not_nil![:i2oo].clone if ais.all? { |ai| !@env.has_key?({t2ot: ai, t2oo: t2o[:t2oo]}) }
         end
         return r
       end
@@ -118,7 +118,7 @@ module Dream
       loop do
         if cs.size == present.size && cs.all? { |c| c.data.not_nil![:t2oo] == cs.first.data.not_nil![:t2oo] }
           if ais.all? { |ai| !@env.has_key?({t2ot: ai, t2oo: cs.first.data.not_nil![:t2oo]}) }
-            r << @env[{i2oi: cs.first.data.not_nil![:t2oo]}]?.not_nil![:i2oo]
+            r << @env[{i2oi: cs.first.data.not_nil![:t2oo]}]?.not_nil![:i2oo].clone
             return r if r.size == limit
           end
           return r unless cs.first.next && cs.first.data.not_nil![:t2ot] == pis.first
