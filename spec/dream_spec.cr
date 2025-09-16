@@ -63,7 +63,7 @@ describe Dream do
       searches_count = 10
 
       tags = (1..tags_count).map { rnd.hex 16 }
-      objects = Hash.zip (1..objects_count).map { rnd.random_bytes 16 }, (1..objects_count).map { tags.sample tags_per_object_count, rnd }
+      objects = Hash.zip (1..objects_count).map { rnd.random_bytes 16 }, (1..objects_count).map { (tags.sample tags_per_object_count, rnd).sort }
       t2o = {} of String => Set(Bytes)
       objects.each { |o, tt| tt.each do |t|
         t2o[t] = Set(Bytes).new unless t2o[t]?
@@ -72,6 +72,7 @@ describe Dream do
       searches = (1..searches_count).map { tags.sample 2, rnd }
 
       objects.each { |oid, tags| ind.add oid, tags }
+      objects.each { |oid, tags| (ind.get oid).sort.should eq tags }
       searches.each do |tags|
         r = ind.find(tags).sort
         correct = tags.map { |t| t2o[t] }.reduce { |acc, cur| acc &= cur }.to_a.sort
