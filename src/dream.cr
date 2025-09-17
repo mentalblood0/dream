@@ -28,34 +28,51 @@ module Dream
     @tc : UInt32 = 0_u32
     @[YAML::Field(ignore: true)]
     @oc : UInt32 = 0_u32
+    @[YAML::Field(ignore: true)]
+    @intx = false
 
     def after_initialize
-      initialize @env
-    end
-
-    def initialize(@env : Env)
       @tc = (@env.cursor({i2ti: UInt32::MAX}, "<=").next.not_nil![:i2ti] rescue 0_u32) + 1
       @oc = (@env.cursor({i2oi: UInt32::MAX}, "<=").next.not_nil![:i2oi] rescue 0_u32) + 1
     end
 
+    def initialize(@env : Env)
+      after_initialize
+    end
+
+    protected def initialize(@env, @tc, @oc)
+      @intx = true
+    end
+
+    def transaction(&)
+      if @intx
+        yield self
+      else
+        @env.transaction do |tx|
+          r = Index.new tx, @tc, @oc
+          yield r
+        end
+      end
+    end
+
     def add(object : Bytes, tags : Array(String))
-      @env.transaction do |tx|
+      transaction do |tx|
         oi = (@env[{o2io: object}]?.not_nil![:o2ii] rescue begin
-          tx << {o2io: object, o2ii: @oc}
-          tx << {i2oi: @oc, i2oo: object}
+          tx.env << {o2io: object, o2ii: @oc}
+          tx.env << {i2oi: @oc, i2oo: object}
           @oc += 1
           @oc - 1
         end)
         tags.each do |tag|
           ti = (@env[{t2it: tag}]?.not_nil![:t2ii] rescue begin
-            tx << {t2it: tag, t2ii: @tc}
-            tx << {i2ti: @tc, i2tt: tag}
+            tx.env << {t2it: tag, t2ii: @tc}
+            tx.env << {i2ti: @tc, i2tt: tag}
             @tc += 1
             @tc - 1
           end)
-          tx << {t2ot: ti, t2oo: oi}
-          tx << {o2to: oi, o2tt: ti}
-          tx << {ti: ti, c: (@env[{ti: ti}]?.not_nil![:c] rescue 0_u32) + 1}
+          tx.env << {t2ot: ti, t2oo: oi}
+          tx.env << {o2to: oi, o2tt: ti}
+          tx.env << {ti: ti, c: (@env[{ti: ti}]?.not_nil![:c] rescue 0_u32) + 1}
         end
       end
     end
@@ -73,27 +90,27 @@ module Dream
 
     def delete(object : Bytes)
       oi = @env[{o2io: object}]?.not_nil![:o2ii] rescue return
-      @env.transaction do |tx|
+      transaction do |tx|
         @env.from({o2to: oi, o2tt: 0_u32}) do |o2t|
           break unless o2t[:o2to] == oi
           ti = o2t[:o2tt]
-          tx.delete({t2ot: ti, t2oo: oi})
-          tx.delete({o2to: oi, o2tt: ti})
-          tx << {ti: ti, c: (@env[{ti: ti}]?.not_nil![:c] - 1 rescue 0_u32)}
+          tx.env.delete({t2ot: ti, t2oo: oi})
+          tx.env.delete({o2to: oi, o2tt: ti})
+          tx.env << {ti: ti, c: (@env[{ti: ti}]?.not_nil![:c] - 1 rescue 0_u32)}
         end
-        tx.delete({o2io: object})
-        tx.delete({i2oi: oi})
+        tx.env.delete({o2io: object})
+        tx.env.delete({i2oi: oi})
       end
     end
 
     def delete(object : Bytes, tags : Array(String))
       oi = @env[{o2io: object}]?.not_nil![:o2ii] rescue return
-      @env.transaction do |tx|
+      transaction do |tx|
         tags.each do |t|
           ti = @env[{t2it: t}]?.not_nil![:t2ii] rescue next
-          tx.delete({t2ot: ti, t2oo: oi})
-          tx.delete({o2to: oi, o2tt: ti})
-          tx << {ti: ti, c: (@env[{ti: ti}]?.not_nil![:c] - 1 rescue 0_u32)}
+          tx.env.delete({t2ot: ti, t2oo: oi})
+          tx.env.delete({o2to: oi, o2tt: ti})
+          tx.env << {ti: ti, c: (@env[{ti: ti}]?.not_nil![:c] - 1 rescue 0_u32)}
         end
       end
     end
