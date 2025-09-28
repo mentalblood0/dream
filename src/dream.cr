@@ -69,6 +69,11 @@ module Dream
       r
     end
 
+    def has_object?(o : Bytes)
+      @env.from({o2io: o}) { |o2i| return o2i[:o2io].hexstring.starts_with? o.hexstring }
+      false
+    end
+
     def add(object : Bytes, tags : Array(String))
       transaction do |tx|
         oi = (@env[{o2io: object}]?.not_nil![:o2ii] rescue begin
