@@ -55,6 +55,16 @@ module Dream
       end
     end
 
+    def objects(&)
+      @env.from({o2io: Bytes.new 1}) { |o2i| yield o2i[:o2io].clone }
+    end
+
+    def objects
+      r = Array(Bytes).new
+      objects { |o| r << o }
+      r
+    end
+
     def add(object : Bytes, tags : Array(String))
       transaction do |tx|
         oi = (@env[{o2io: object}]?.not_nil![:o2ii] rescue begin

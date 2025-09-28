@@ -27,8 +27,11 @@ describe Dream do
 
     it "simple test" do
       ind.add("o1".to_slice, ["a"])
+      ind.objects.should eq ["o1".to_slice]
       ind.add("o2".to_slice, ["a", "b"])
+      ind.objects.sort.should eq ["o1".to_slice, "o2".to_slice].sort
       ind.add("o3".to_slice, ["a", "b", "c"])
+      ind.objects.sort.should eq ["o1".to_slice, "o2".to_slice, "o3".to_slice].sort
 
       ind.find(["a", "b", "c"], limit: 2).should eq ["o3".to_slice]
       ind.find(["a", "b"]).should eq ["o2".to_slice, "o3".to_slice]
@@ -45,11 +48,13 @@ describe Dream do
       ind.find(["a", "b"], ["c"]).should eq ["o2".to_slice]
 
       ind.delete "o3".to_slice, ["a", "c"]
+      ind.objects.sort.should eq ["o1".to_slice, "o2".to_slice, "o3".to_slice].sort
       ind.find(["a"]).should eq ["o1".to_slice, "o2".to_slice]
       ind.find(["b"]).should eq ["o2".to_slice, "o3".to_slice]
       ind.find(["c"]).should eq [] of Bytes
 
       ind.delete "o2".to_slice
+      ind.objects.sort.should eq ["o1".to_slice, "o3".to_slice].sort
       ind.find(["a"]).should eq ["o1".to_slice]
       ind.find(["b"]).should eq ["o3".to_slice]
       ind.find(["c"]).should eq [] of Bytes
@@ -72,6 +77,8 @@ describe Dream do
       searches = (1..searches_count).map { tags.sample 2, rnd }
 
       objects.each { |oid, tags| ind.add oid, tags }
+      ind.objects.sort.should eq objects.keys.sort
+
       objects.each { |oid, tags| (ind.get oid).sort.should eq tags }
       searches.each do |tags|
         r = ind.find(tags).sort
