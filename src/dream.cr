@@ -64,7 +64,7 @@ module Dream
     end
 
     def objects
-      r = Array(Bytes).new
+      r = [] of Bytes
       objects { |o| r << o }
       r
     end
@@ -129,7 +129,7 @@ module Dream
       end
     end
 
-    def find(present : Array(String), absent : Array(String) = [] of String, limit : UInt32 = UInt32::MAX, from : Bytes? = nil)
+    def find(present : Array(String), absent : Array(String) = [] of String, from : Bytes? = nil, &)
       fromi = if from
                 @env[{o2io: from}]?.not_nil![:o2ii]
               else
@@ -140,17 +140,16 @@ module Dream
       ais.sort_by! { |ti| @env[{ti: ti}]?.not_nil![:c] }
       ais.reverse!
 
-      r = [] of Bytes
       if present.size == 1
-        ti = @env[{t2it: present.first}]?.not_nil![:t2ii] rescue return r
+        ti = @env[{t2it: present.first}]?.not_nil![:t2ii] rescue return
         @env.from({t2ot: ti, t2oo: (fromi.not_nil! rescue 0_u32)}, ">") do |t2o|
-          break if r.size == limit || t2o[:t2ot] != ti
-          r << @env[{i2oi: t2o[:t2oo]}]?.not_nil![:i2oo].clone if ais.all? { |ai| !@env.has_key?({t2ot: ai, t2oo: t2o[:t2oo]}) }
+          break if t2o[:t2ot] != ti
+          yield @env[{i2oi: t2o[:t2oo]}]?.not_nil![:i2oo].clone if ais.all? { |ai| !@env.has_key?({t2ot: ai, t2oo: t2o[:t2oo]}) }
         end
-        return r
+        return
       end
 
-      pis = present.map { |t| @env[{t2it: t}]?.not_nil![:t2ii] rescue return r }
+      pis = present.map { |t| @env[{t2it: t}]?.not_nil![:t2ii] rescue return }
       pis.sort_by! { |ti| @env[{ti: ti}]?.not_nil![:c] }
 
       cs = [] of Dream::Env::T2oCursor
@@ -160,10 +159,9 @@ module Dream
       loop do
         if cs.size == present.size && cs.all? { |c| c.data.not_nil![:t2oo] == cs.first.data.not_nil![:t2oo] }
           if ais.all? { |ai| !@env.has_key?({t2ot: ai, t2oo: cs.first.data.not_nil![:t2oo]}) }
-            r << @env[{i2oi: cs.first.data.not_nil![:t2oo]}]?.not_nil![:i2oo].clone
-            return r if r.size == limit
+            yield @env[{i2oi: cs.first.data.not_nil![:t2oo]}]?.not_nil![:i2oo].clone
           end
-          return r unless cs.first.next && cs.first.data.not_nil![:t2ot] == pis.first
+          return unless cs.first.next && cs.first.data.not_nil![:t2ot] == pis.first
           i1 = 0
           i2 = 1
         end
@@ -174,32 +172,41 @@ module Dream
           else
             c = @env.cursor({t2ot: pis[i1], t2oo: cs.last.data.not_nil![:t2oo]})
           end
-          return r unless c.next && c.data.not_nil![:t2ot] == pis[i1]
+          return unless c.next && c.data.not_nil![:t2ot] == pis[i1]
           cs << c
         end
         c1 = cs[i1]
 
         if cs.size < present.size && cs.size <= i2
           c = @env.cursor({t2ot: pis[i2], t2oo: cs.last.data.not_nil![:t2oo]})
-          return r unless c.next && c.data.not_nil![:t2ot] == pis[i2]
+          return unless c.next && c.data.not_nil![:t2ot] == pis[i2]
           cs << c
         end
         c2 = cs[i2]
 
         until c2.data.not_nil![:t2oo] >= c1.data.not_nil![:t2oo]
-          return r unless c2.next && c2.data.not_nil![:t2ot] == pis[i2]
+          return unless c2.next && c2.data.not_nil![:t2ot] == pis[i2]
         end
         if c2.data.not_nil![:t2oo] == c1.data.not_nil![:t2oo]
           i1 = (i1 + 1) % present.size
           i2 = (i2 + 1) % present.size
         else
           until cs.first.data.not_nil![:t2oo] >= cs[i2].data.not_nil![:t2oo]
-            return r unless cs.first.next && cs.first.data.not_nil![:t2ot] == pis.first
+            return unless cs.first.next && cs.first.data.not_nil![:t2ot] == pis.first
           end
           i1 = 0
           i2 = 1
         end
       end
+    end
+
+    def find(present : Array(String), absent : Array(String) = [] of String, limit : UInt32 = UInt32::MAX, from : Bytes? = nil)
+      r = [] of Bytes
+      find(present, absent, from) do |o|
+        break if r.size == limit
+        r << o
+      end
+      r
     end
   end
 end
