@@ -55,6 +55,10 @@ module Dream
       end
     end
 
+    def get_tag(prefix : String)
+      @env.from({t2it: ""}) { |t2i| return t2i[:t2it].starts_with? prefix ? t2i[:t2it] : nil }
+    end
+
     def objects(&)
       @env.from({o2io: Bytes.new 1}) { |o2i| yield o2i[:o2io].clone }
     end
