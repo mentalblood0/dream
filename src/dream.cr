@@ -125,16 +125,23 @@ module Dream
     def delete(object : Bytes, tags : Array(String))
       oi = @env[{o2io: object}]?.not_nil![:o2ii] rescue return
       transaction do |tx|
-        if (tx.get object) == tags
-          tx.env.delete({o2io: object})
-          tx.env.delete({i2oi: oi})
-        end
         tags.each do |t|
           ti = @env[{t2it: t}]?.not_nil![:t2ii] rescue next
           tx.env.delete({t2ot: ti, t2oo: oi})
           tx.env.delete({o2to: oi, o2tt: ti})
           tx.env << {ti: ti, c: (@env[{ti: ti}]?.not_nil![:c] - 1 rescue 0_u32)}
         end
+      end
+      transaction do |tx|
+        @env.from({o2to: oi, o2tt: 0_u32}, ">=") do |o2t|
+          if o2t[:o2to] == oi
+            return
+          else
+            break
+          end
+        end
+        tx.env.delete({o2io: object})
+        tx.env.delete({i2oi: oi})
       end
     end
 
