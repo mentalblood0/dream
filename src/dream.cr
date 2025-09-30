@@ -152,20 +152,20 @@ module Dream
 
     def find(present : Array(Bytes | Id), absent : Array(Bytes | Id) = [] of Bytes | Id, from : Id? = nil, &)
       ais = absent.compact_map { |t| (t.is_a? Bytes) ? (digest t) : t }
-      ais.sort_by! { |ti| @env[{ti0: ti[0], ti1: ti[1]}]?.not_nil![:c] }
+      ais.sort_by! { |ti| @env[{ti0: ti[0], ti1: ti[1]}]?.not_nil![:c] rescue UInt64::MAX }
       ais.reverse!
 
-      if present.size == 1
-        ti = digest present.first
+      pis = present.map { |t| (t.is_a? Bytes) ? (digest t) : t }
+      pis.sort_by! { |ti| @env[{ti0: ti[0], ti1: ti[1]}]?.not_nil![:c] rescue return }
+
+      if pis.size == 1
+        ti = pis.first
         @env.from((T2o.new ti, (from ? from : {0_u64, 0_u64})).tup, ">") do |t2o|
           break if {t2o[:t2ot0], t2o[:t2ot1]} != ti
           yield({t2o[:t2oo0], t2o[:t2oo1]}) if ais.all? { |ai| !@env.has_key? (T2o.new ai, (T2o.new t2o).o).tup }
         end
         return
       end
-
-      pis = present.map { |t| (t.is_a? Bytes) ? (digest t) : t }
-      pis.sort_by! { |ti| @env[{ti0: ti[0], ti1: ti[1]}]?.not_nil![:c] rescue return }
 
       cs = [] of Env::T2oCursor
 
