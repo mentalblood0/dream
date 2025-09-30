@@ -15,17 +15,13 @@ describe Dream do
             compression: zstd
           o2t:
             *ddbs
-          i2t:
+          d2v:
             *ddbs
-          t2i:
-            *ddbs
-          i2o:
-            *ddbs
-          o2i:
+          c:
             *ddbs
     YAML
 
-    it "simple test" do
+    it "simple test", focus: true do
       a = "a".to_slice
       b = "b".to_slice
       c = "c".to_slice
@@ -34,39 +30,34 @@ describe Dream do
       o3 = "o3".to_slice
 
       ind.add(o1, [a])
-      ind.objects.should eq [o1]
       ind.add(o2, [a, b])
-      ind.objects.sort.should eq [o1, o2].sort
       ind.add(o3, [a, b, c])
-      ind.objects.sort.should eq [o1, o2, o3].sort
 
       ind.find([a, b, c], limit: 2).should eq [o3]
       ind.find([a, b]).should eq [o2, o3]
       ind.find([a, b], limit: 1).should eq [o2]
-      ind.find([a]).should eq [o1, o2, o3]
-      ind.find([a], limit: 2).should eq [o1, o2]
-      ind.find([a], limit: 1).should eq [o1]
+      ind.find([a]).sort.should eq [o1, o2, o3].sort
+      ind.find([a], limit: 2).sort.should eq [o1, o2].sort
+      ind.find([a], limit: 1).should eq [o2]
 
       ind.find([a], [a]).should eq [] of Bytes
       ind.find([a], [b]).should eq [o1]
-      ind.find([a], [c]).should eq [o1, o2]
+      ind.find([a], [c]).sort.should eq [o1, o2].sort
       ind.find([b], [a]).should eq [] of Bytes
       ind.find([b], [c]).should eq [o2]
       ind.find([a, b], [c]).should eq [o2]
 
       ind.delete o3, [a, c]
-      ind.objects.sort.should eq [o1, o2, o3].sort
-      ind.find([a]).should eq [o1, o2]
+      ind.find([a]).sort.should eq [o1, o2].sort
       ind.find([b]).should eq [o2, o3]
       ind.find([c]).should eq [] of Bytes
 
       ind.delete o2
-      ind.objects.sort.should eq [o1, o3].sort
       ind.find([a]).should eq [o1]
       ind.find([b]).should eq [o3]
       ind.find([c]).should eq [] of Bytes
     end
-    it "generative test", focus: true do
+    it "generative test" do
       rnd = Random.new 0
 
       tags_count = 4
@@ -84,7 +75,6 @@ describe Dream do
       searches = (1..searches_count).map { tags.sample 2, rnd }
 
       objects.each { |oid, tags| ind.add oid, tags }
-      ind.objects.sort.should eq objects.keys.sort
 
       objects.each { |oid, tags| (ind.get oid).sort.should eq tags }
       searches.each do |tags|

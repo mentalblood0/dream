@@ -24,13 +24,9 @@ env:
         compression: zstd
       o2t:
         *ddbs
-      i2t:
+      d2v:
         *ddbs
-      t2i:
-        *ddbs
-      i2o:
-        *ddbs
-      o2i:
+      c:
         *ddbs
 YAML
 
