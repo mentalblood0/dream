@@ -82,13 +82,13 @@ module Dream
       @env.delete({d2vd0: i[0], d2vd1: i[1]})
     end
 
-    def add(object : Bytes, tags : Array(Bytes))
+    def add(o : Bytes | Id, ts : Array(Bytes | Id))
+      oi = (o.is_a? Bytes) ? (digest o) : o
       transaction do |tx|
-        oi = digest object
-        tx.memoize oi, object
-        tags.each do |tag|
-          ti = digest tag
-          tx.memoize ti, tag
+        tx.memoize oi, o if o.is_a? Bytes
+        ts.each do |t|
+          ti = (t.is_a? Bytes) ? (digest t) : t
+          tx.memoize ti, t if t.is_a? Bytes
           tx.env << {t2ot0: ti[0], t2ot1: ti[1], t2oo0: oi[0], t2oo1: oi[1]}
           tx.env << {o2to0: oi[0], o2to1: oi[1], o2tt0: ti[0], o2tt1: ti[1]}
           tx.env << {ti0: ti[0], ti1: ti[1], c: (@env[{ti0: ti[0], ti1: ti[1]}]?.not_nil![:c] rescue 0_u64) + 1}
@@ -100,22 +100,22 @@ module Dream
       @env[{d2vd0: i[0], d2vd1: i[1]}]?.not_nil![:d2vv].clone rescue nil
     end
 
-    def get(object : Bytes, &)
-      oi = digest object
+    def get(o : Bytes | Id, &)
+      oi = (o.is_a? Bytes) ? (digest o) : o
       @env.from({o2to0: oi[0], o2to1: oi[1], o2tt0: 0_u64, o2tt1: 0_u64}) do |o2t|
         break unless {o2t[:o2to0], o2t[:o2to1]} == oi
         yield({o2t[:o2tt0], o2t[:o2tt1]})
       end
     end
 
-    def get(object : Bytes) : Array(Id)
+    def get(o : Bytes | Id) : Array(Id)
       r = [] of Id
-      get(object) { |t| r << t }
+      get(o) { |t| r << t }
       r
     end
 
-    def delete(object : Bytes)
-      oi = digest object
+    def delete(o : Bytes | Id)
+      oi = (o.is_a? Bytes) ? (digest o) : o
       transaction do |tx|
         @env.from({o2to0: oi[0], o2to1: oi[1], o2tt0: 0_u64, o2tt1: 0_u64}) do |o2t|
           break unless {o2t[:o2to0], o2t[:o2to1]} == oi
@@ -124,49 +124,47 @@ module Dream
           tx.env.delete({o2to0: ti[0], o2to1: ti[1], o2tt0: oi[0], o2tt1: oi[1]})
           tx.env << {ti0: ti[0], ti1: ti[1], c: (@env[{ti0: ti[0], ti1: ti[1]}]?.not_nil![:c] - 1 rescue 0_u64)}
         end
-        tx.forget oi
+        tx.forget oi if o.is_a? Bytes
       end
     end
 
-    def delete(object : Bytes, tags : Array(Bytes))
-      oi = digest object
+    def delete(o : Bytes | Id, ts : Array(Bytes | Id))
+      oi = (o.is_a? Bytes) ? (digest o) : o
       transaction do |tx|
-        tags.each do |t|
-          ti = digest t
+        ts.each do |t|
+          ti = (t.is_a? Bytes) ? (digest t) : t
           tx.env.delete({t2ot0: ti[0], t2ot1: ti[1], t2oo0: oi[0], t2oo1: oi[1]})
           tx.env.delete({o2to0: oi[0], o2to1: oi[1], o2tt0: ti[0], o2tt1: ti[1]})
           tx.env << {ti0: ti[0], ti1: ti[1], c: (@env[{ti0: ti[0], ti1: ti[1]}]?.not_nil![:c] - 1 rescue 0_u64)}
         end
       end
       transaction do |tx|
-        @env.from({o2to0: oi[0], o2to1: oi[1], o2tt0: 0_u64, o2tt1: 0_u64}) do |o2t|
+        tx.env.from({o2to0: oi[0], o2to1: oi[1], o2tt0: 0_u64, o2tt1: 0_u64}) do |o2t|
           if {o2t[:o2to0], o2t[:o2to1]} == oi
             return
           else
             break
           end
         end
-        forget oi
+        tx.forget oi if o.is_a? Bytes
       end
     end
 
-    def find(present : Array(Bytes), absent : Array(Bytes) = [] of Bytes, from : Id? = nil, &)
-      fromi = from ? from : nil
-
-      ais = absent.compact_map { |t| digest t }
+    def find(present : Array(Bytes | Id), absent : Array(Bytes | Id) = [] of Bytes | Id, from : Id? = nil, &)
+      ais = absent.compact_map { |t| (t.is_a? Bytes) ? (digest t) : t }
       ais.sort_by! { |ti| @env[{ti0: ti[0], ti1: ti[1]}]?.not_nil![:c] }
       ais.reverse!
 
       if present.size == 1
         ti = digest present.first
-        @env.from((T2o.new ti, (fromi ? fromi : {0_u64, 0_u64})).tup, ">") do |t2o|
+        @env.from((T2o.new ti, (from ? from : {0_u64, 0_u64})).tup, ">") do |t2o|
           break if {t2o[:t2ot0], t2o[:t2ot1]} != ti
           yield({t2o[:t2oo0], t2o[:t2oo1]}) if ais.all? { |ai| !@env.has_key? (T2o.new ai, (T2o.new t2o).o).tup }
         end
         return
       end
 
-      pis = present.map { |t| digest t }
+      pis = present.map { |t| (t.is_a? Bytes) ? (digest t) : t }
       pis.sort_by! { |ti| @env[{ti0: ti[0], ti1: ti[1]}]?.not_nil![:c] rescue return }
 
       cs = [] of Env::T2oCursor
@@ -185,7 +183,7 @@ module Dream
 
         if cs.size < present.size && cs.size <= i1
           if i1 == 0
-            c = @env.cursor((T2o.new pis[i1], (fromi ? fromi : {0_u64, 0_u64})).tup, ">")
+            c = @env.cursor((T2o.new pis[i1], (from ? from : {0_u64, 0_u64})).tup, ">")
           else
             c = @env.cursor((T2o.new pis[i1], (T2o.new cs.last.data.not_nil!).o).tup)
           end
