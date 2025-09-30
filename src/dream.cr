@@ -8,8 +8,8 @@ module Dream
                           o2t: {key: {o2to: UInt32,
                                       o2tt: UInt32}},
                           i2t: {key: {i2ti: UInt32},
-                                value: {i2tt: String}},
-                          t2i: {key: {t2it: String},
+                                value: {i2tt: Bytes}},
+                          t2i: {key: {t2it: Bytes},
                                 value: {t2ii: UInt32}},
                           i2o: {key: {i2oi: UInt32},
                                 value: {i2oo: Bytes}},
@@ -69,7 +69,7 @@ module Dream
       @env[{o2io: o}]? ? true : false
     end
 
-    def add(object : Bytes, tags : Array(String))
+    def add(object : Bytes, tags : Array(Bytes))
       transaction do |tx|
         oi = (@env[{o2io: object}]?.not_nil![:o2ii] rescue begin
           tx.env << {o2io: object, o2ii: @oc}
@@ -91,13 +91,13 @@ module Dream
       end
     end
 
-    def get(object : Bytes) : Array(String)
-      r = [] of String
-      oi = @env[{o2io: object}]?.not_nil![:o2ii] rescue return [] of String
+    def get(object : Bytes) : Array(Bytes)
+      r = [] of Bytes
+      oi = @env[{o2io: object}]?.not_nil![:o2ii] rescue return [] of Bytes
       @env.from({o2to: oi, o2tt: 0_u32}) do |o2t|
         break unless o2t[:o2to] == oi
         ti = o2t[:o2tt]
-        r << @env[{i2ti: ti}]?.not_nil![:i2tt]
+        r << @env[{i2ti: ti}]?.not_nil![:i2tt].clone
       end
       r
     end
@@ -117,7 +117,7 @@ module Dream
       end
     end
 
-    def delete(object : Bytes, tags : Array(String))
+    def delete(object : Bytes, tags : Array(Bytes))
       oi = @env[{o2io: object}]?.not_nil![:o2ii] rescue return
       transaction do |tx|
         tags.each do |t|
@@ -140,7 +140,7 @@ module Dream
       end
     end
 
-    def find(present : Array(String), absent : Array(String) = [] of String, from : Bytes? = nil, &)
+    def find(present : Array(Bytes), absent : Array(Bytes) = [] of Bytes, from : Bytes? = nil, &)
       fromi = if from
                 @env[{o2io: from}]?.not_nil![:o2ii]
               else
@@ -211,7 +211,7 @@ module Dream
       end
     end
 
-    def find(present : Array(String), absent : Array(String) = [] of String, limit : UInt32 = UInt32::MAX, from : Bytes? = nil)
+    def find(present : Array(Bytes), absent : Array(Bytes) = [] of Bytes, limit : UInt32 = UInt32::MAX, from : Bytes? = nil)
       r = [] of Bytes
       find(present, absent, from) do |o|
         break if r.size == limit

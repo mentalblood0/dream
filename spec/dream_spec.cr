@@ -26,38 +26,45 @@ describe Dream do
     YAML
 
     it "simple test" do
-      ind.add("o1".to_slice, ["a"])
-      ind.objects.should eq ["o1".to_slice]
-      ind.add("o2".to_slice, ["a", "b"])
-      ind.objects.sort.should eq ["o1".to_slice, "o2".to_slice].sort
-      ind.add("o3".to_slice, ["a", "b", "c"])
-      ind.objects.sort.should eq ["o1".to_slice, "o2".to_slice, "o3".to_slice].sort
+      a = "a".to_slice
+      b = "b".to_slice
+      c = "c".to_slice
+      o1 = "o1".to_slice
+      o2 = "o2".to_slice
+      o3 = "o3".to_slice
 
-      ind.find(["a", "b", "c"], limit: 2).should eq ["o3".to_slice]
-      ind.find(["a", "b"]).should eq ["o2".to_slice, "o3".to_slice]
-      ind.find(["a", "b"], limit: 1).should eq ["o2".to_slice]
-      ind.find(["a"]).should eq ["o1".to_slice, "o2".to_slice, "o3".to_slice]
-      ind.find(["a"], limit: 2).should eq ["o1".to_slice, "o2".to_slice]
-      ind.find(["a"], limit: 1).should eq ["o1".to_slice]
+      ind.add(o1, [a])
+      ind.objects.should eq [o1]
+      ind.add(o2, [a, b])
+      ind.objects.sort.should eq [o1, o2].sort
+      ind.add(o3, [a, b, c])
+      ind.objects.sort.should eq [o1, o2, o3].sort
 
-      ind.find(["a"], ["a"]).should eq [] of Bytes
-      ind.find(["a"], ["b"]).should eq ["o1".to_slice]
-      ind.find(["a"], ["c"]).should eq ["o1".to_slice, "o2".to_slice]
-      ind.find(["b"], ["a"]).should eq [] of Bytes
-      ind.find(["b"], ["c"]).should eq ["o2".to_slice]
-      ind.find(["a", "b"], ["c"]).should eq ["o2".to_slice]
+      ind.find([a, b, c], limit: 2).should eq [o3]
+      ind.find([a, b]).should eq [o2, o3]
+      ind.find([a, b], limit: 1).should eq [o2]
+      ind.find([a]).should eq [o1, o2, o3]
+      ind.find([a], limit: 2).should eq [o1, o2]
+      ind.find([a], limit: 1).should eq [o1]
 
-      ind.delete "o3".to_slice, ["a", "c"]
-      ind.objects.sort.should eq ["o1".to_slice, "o2".to_slice, "o3".to_slice].sort
-      ind.find(["a"]).should eq ["o1".to_slice, "o2".to_slice]
-      ind.find(["b"]).should eq ["o2".to_slice, "o3".to_slice]
-      ind.find(["c"]).should eq [] of Bytes
+      ind.find([a], [a]).should eq [] of Bytes
+      ind.find([a], [b]).should eq [o1]
+      ind.find([a], [c]).should eq [o1, o2]
+      ind.find([b], [a]).should eq [] of Bytes
+      ind.find([b], [c]).should eq [o2]
+      ind.find([a, b], [c]).should eq [o2]
 
-      ind.delete "o2".to_slice
-      ind.objects.sort.should eq ["o1".to_slice, "o3".to_slice].sort
-      ind.find(["a"]).should eq ["o1".to_slice]
-      ind.find(["b"]).should eq ["o3".to_slice]
-      ind.find(["c"]).should eq [] of Bytes
+      ind.delete o3, [a, c]
+      ind.objects.sort.should eq [o1, o2, o3].sort
+      ind.find([a]).should eq [o1, o2]
+      ind.find([b]).should eq [o2, o3]
+      ind.find([c]).should eq [] of Bytes
+
+      ind.delete o2
+      ind.objects.sort.should eq [o1, o3].sort
+      ind.find([a]).should eq [o1]
+      ind.find([b]).should eq [o3]
+      ind.find([c]).should eq [] of Bytes
     end
     it "generative test", focus: true do
       rnd = Random.new 0
@@ -67,9 +74,9 @@ describe Dream do
       tags_per_object_count = 2
       searches_count = 10
 
-      tags = (1..tags_count).map { rnd.hex 16 }
+      tags = (1..tags_count).map { rnd.random_bytes 16 }
       objects = Hash.zip (1..objects_count).map { rnd.random_bytes 16 }, (1..objects_count).map { (tags.sample tags_per_object_count, rnd).sort }
-      t2o = {} of String => Set(Bytes)
+      t2o = {} of Bytes => Set(Bytes)
       objects.each { |o, tt| tt.each do |t|
         t2o[t] = Set(Bytes).new unless t2o[t]?
         t2o[t] << o

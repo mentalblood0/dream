@@ -12,7 +12,7 @@ config = NamedTuple(
 
 rnd = Random.new config[:seed]
 
-tags = Array.new config[:tags_count] { rnd.hex 16 }
+tags = Array.new config[:tags_count] { rnd.random_bytes 16 }
 
 ind = Dream::Index.from_yaml <<-YAML
 env:
