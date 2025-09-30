@@ -55,10 +55,6 @@ module Dream
       end
     end
 
-    def get_tag(prefix : String)
-      @env.from({t2it: ""}) { |t2i| return t2i[:t2it].starts_with? prefix ? t2i[:t2it] : nil }
-    end
-
     def objects(&)
       @env.from({o2io: Bytes.new 1}) { |o2i| yield o2i[:o2io].clone }
     end
@@ -70,8 +66,7 @@ module Dream
     end
 
     def has_object?(o : Bytes)
-      @env.from({o2io: o}) { |o2i| return o2i[:o2io].hexstring.starts_with? o.hexstring }
-      false
+      @env[{o2io: o}]? ? true : false
     end
 
     def add(object : Bytes, tags : Array(String))
