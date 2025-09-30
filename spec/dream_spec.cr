@@ -33,29 +33,29 @@ describe Dream do
       ind.add(o2, [a, b])
       ind.add(o3, [a, b, c])
 
-      ind.find([a, b, c], limit: 2).should eq [o3]
-      ind.find([a, b]).should eq [o2, o3]
-      ind.find([a, b], limit: 1).should eq [o2]
-      ind.find([a]).sort.should eq [o1, o2, o3].sort
-      ind.find([a], limit: 2).sort.should eq [o1, o2].sort
-      ind.find([a], limit: 1).should eq [o2]
+      ind.find([a, b, c], limit: 2).map { |i| ind[i]?.not_nil! }.should eq [o3]
+      ind.find([a, b]).map { |i| ind[i]?.not_nil! }.should eq [o2, o3]
+      ind.find([a, b], limit: 1).map { |i| ind[i]?.not_nil! }.should eq [o2]
+      ind.find([a]).map { |i| ind[i]?.not_nil! }.sort.should eq [o1, o2, o3].sort
+      ind.find([a], limit: 2).map { |i| ind[i]?.not_nil! }.sort.should eq [o1, o2].sort
+      ind.find([a], limit: 1).map { |i| ind[i]?.not_nil! }.should eq [o2]
 
-      ind.find([a], [a]).should eq [] of Bytes
-      ind.find([a], [b]).should eq [o1]
-      ind.find([a], [c]).sort.should eq [o1, o2].sort
-      ind.find([b], [a]).should eq [] of Bytes
-      ind.find([b], [c]).should eq [o2]
-      ind.find([a, b], [c]).should eq [o2]
+      ind.find([a], [a]).map { |i| ind[i]?.not_nil! }.should eq [] of Bytes
+      ind.find([a], [b]).map { |i| ind[i]?.not_nil! }.should eq [o1]
+      ind.find([a], [c]).map { |i| ind[i]?.not_nil! }.sort.should eq [o1, o2].sort
+      ind.find([b], [a]).map { |i| ind[i]?.not_nil! }.should eq [] of Bytes
+      ind.find([b], [c]).map { |i| ind[i]?.not_nil! }.should eq [o2]
+      ind.find([a, b], [c]).map { |i| ind[i]?.not_nil! }.should eq [o2]
 
       ind.delete o3, [a, c]
-      ind.find([a]).sort.should eq [o1, o2].sort
-      ind.find([b]).should eq [o2, o3]
-      ind.find([c]).should eq [] of Bytes
+      ind.find([a]).map { |i| ind[i]?.not_nil! }.sort.should eq [o1, o2].sort
+      ind.find([b]).map { |i| ind[i]?.not_nil! }.should eq [o2, o3]
+      ind.find([c]).map { |i| ind[i]?.not_nil! }.should eq [] of Bytes
 
       ind.delete o2
-      ind.find([a]).should eq [o1]
-      ind.find([b]).should eq [o3]
-      ind.find([c]).should eq [] of Bytes
+      ind.find([a]).map { |i| ind[i]?.not_nil! }.should eq [o1]
+      ind.find([b]).map { |i| ind[i]?.not_nil! }.should eq [o3]
+      ind.find([c]).map { |i| ind[i]?.not_nil! }.should eq [] of Bytes
     end
     it "generative test" do
       rnd = Random.new 0
@@ -76,17 +76,17 @@ describe Dream do
 
       objects.each { |oid, tags| ind.add oid, tags }
 
-      objects.each { |oid, tags| (ind.get oid).sort.should eq tags }
+      objects.each { |oid, tags| (ind.get oid).map { |i| ind[i]?.not_nil! }.sort.should eq tags }
       searches.each do |tags|
-        r = ind.find(tags).sort
+        r = ind.find(tags).map { |i| ind[i]?.not_nil! }.sort
         correct = tags.map { |t| t2o[t] }.reduce { |acc, cur| acc &= cur }.to_a.sort
         r.should eq correct
 
-        r = [] of Bytes
-        until (rp = ind.find(tags, limit: 2, from: (r.last rescue nil))).empty?
+        r = [] of Dream::Id
+        until (rp = ind.find(tags, limit: 2_u64, from: (r.last rescue nil))).empty?
           r += rp
         end
-        r.sort.should eq correct
+        r.map { |i| ind[i]?.not_nil! }.sort.should eq correct
       end
     end
   end

@@ -82,10 +82,6 @@ module Dream
       @env.delete({d2vd0: i[0], d2vd1: i[1]})
     end
 
-    protected def value(i : Id)
-      @env[{d2vd0: i[0], d2vd1: i[1]}]?.not_nil![:d2vv] rescue nil
-    end
-
     def add(object : Bytes, tags : Array(Bytes))
       transaction do |tx|
         oi = digest object
@@ -100,17 +96,20 @@ module Dream
       end
     end
 
+    def []?(i : Id)
+      @env[{d2vd0: i[0], d2vd1: i[1]}]?.not_nil![:d2vv].clone rescue nil
+    end
+
     def get(object : Bytes, &)
       oi = digest object
       @env.from({o2to0: oi[0], o2to1: oi[1], o2tt0: 0_u64, o2tt1: 0_u64}) do |o2t|
         break unless {o2t[:o2to0], o2t[:o2to1]} == oi
-        ti = {o2t[:o2tt0], o2t[:o2tt1]}
-        yield (value ti).not_nil!.clone
+        yield({o2t[:o2tt0], o2t[:o2tt1]})
       end
     end
 
-    def get(object : Bytes) : Array(Bytes)
-      r = [] of Bytes
+    def get(object : Bytes) : Array(Id)
+      r = [] of Id
       get(object) { |t| r << t }
       r
     end
@@ -151,8 +150,8 @@ module Dream
       end
     end
 
-    def find(present : Array(Bytes), absent : Array(Bytes) = [] of Bytes, from : Bytes? = nil, &)
-      fromi = from ? (digest from) : nil
+    def find(present : Array(Bytes), absent : Array(Bytes) = [] of Bytes, from : Id? = nil, &)
+      fromi = from ? from : nil
 
       ais = absent.compact_map { |t| digest t }
       ais.sort_by! { |ti| @env[{ti0: ti[0], ti1: ti[1]}]?.not_nil![:c] }
@@ -162,7 +161,7 @@ module Dream
         ti = digest present.first
         @env.from((T2o.new ti, (fromi ? fromi : {0_u64, 0_u64})).tup, ">") do |t2o|
           break if {t2o[:t2ot0], t2o[:t2ot1]} != ti
-          yield value({t2o[:t2oo0], t2o[:t2oo1]}).not_nil!.clone if ais.all? { |ai| !@env.has_key? (T2o.new ai, (T2o.new t2o).o).tup }
+          yield({t2o[:t2oo0], t2o[:t2oo1]}) if ais.all? { |ai| !@env.has_key? (T2o.new ai, (T2o.new t2o).o).tup }
         end
         return
       end
@@ -177,7 +176,7 @@ module Dream
       loop do
         if cs.size == present.size && cs.all? { |c| (T2o.new c.data.not_nil!).o == (T2o.new cs.first.data.not_nil!).o }
           if ais.all? { |ai| !@env.has_key? (T2o.new ai, (T2o.new cs.first.data.not_nil!).o).tup }
-            yield value({cs.first.data.not_nil![:t2oo0], cs.first.data.not_nil![:t2oo1]}).not_nil!.clone
+            yield({cs.first.data.not_nil![:t2oo0], cs.first.data.not_nil![:t2oo1]})
           end
           return unless cs.first.next && ((T2o.new cs.first.data.not_nil!).t == pis.first)
           i1 = 0
@@ -218,8 +217,8 @@ module Dream
       end
     end
 
-    def find(present : Array(Bytes), absent : Array(Bytes) = [] of Bytes, limit : UInt32 = UInt32::MAX, from : Bytes? = nil)
-      r = [] of Bytes
+    def find(present : Array(Bytes), absent : Array(Bytes) = [] of Bytes, limit : UInt64 = UInt64::MAX, from : Id? = nil) : Array(Id)
+      r = [] of Id
       find(present, absent, from) do |o|
         break if r.size == limit
         r << o
