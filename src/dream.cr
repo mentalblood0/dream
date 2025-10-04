@@ -160,7 +160,7 @@ module Dream
 
       if pis.size == 1
         ti = pis.first
-        @env.from((T2o.new ti, (from ? from : {0_u64, 0_u64})).tup, ">") do |t2o|
+        @env.from((T2o.new ti, (from ? from : {0_u64, 0_u64})).tup, from ? ">" : ">=") do |t2o|
           break if {t2o[:t2ot0], t2o[:t2ot1]} != ti
           yield({t2o[:t2oo0], t2o[:t2oo1]}) if ais.all? { |ai| !@env.has_key? (T2o.new ai, (T2o.new t2o).o).tup }
         end
@@ -183,7 +183,7 @@ module Dream
 
         if cs.size < present.size && cs.size <= i1
           if i1 == 0
-            c = @env.cursor((T2o.new pis[i1], (from ? from : {0_u64, 0_u64})).tup, ">")
+            c = @env.cursor((T2o.new pis[i1], (from ? from : {0_u64, 0_u64})).tup, from ? ">" : ">=")
           else
             c = @env.cursor((T2o.new pis[i1], (T2o.new cs.last.data.not_nil!).o).tup)
           end
