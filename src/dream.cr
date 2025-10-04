@@ -215,7 +215,7 @@ module Dream
       end
     end
 
-    def find(present : Array(Bytes), absent : Array(Bytes) = [] of Bytes, limit : UInt64 = UInt64::MAX, from : Id? = nil) : Array(Id)
+    def find(present : Array(Bytes | Id), absent : Array(Bytes | Id) = [] of Bytes, limit : UInt64 = UInt64::MAX, from : Id? = nil) : Array(Id)
       r = [] of Id
       find(present, absent, from) do |o|
         break if r.size == limit

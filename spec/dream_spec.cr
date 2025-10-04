@@ -21,7 +21,7 @@ describe Dream do
             *ddbs
     YAML
 
-    it "simple test", focus: true do
+    it "simple test" do
       a = "a".to_slice
       b = "b".to_slice
       c = "c".to_slice
@@ -56,13 +56,16 @@ describe Dream do
       ind.find([a]).map { |i| ind[i]?.not_nil! }.should eq [o1]
       ind.find([b]).map { |i| ind[i]?.not_nil! }.should eq [o3]
       ind.find([c]).map { |i| ind[i]?.not_nil! }.should eq [] of Bytes
+
+      ind.delete o1
+      ind.delete o3
     end
     it "generative test" do
       rnd = Random.new 0
 
-      tags_count = 4
-      objects_count = 10
-      tags_per_object_count = 2
+      tags_count = 8
+      objects_count = 100
+      tags_per_object_count = 3
       searches_count = 10
 
       tags = (1..tags_count).map { rnd.random_bytes 16 }
