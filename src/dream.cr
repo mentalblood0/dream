@@ -100,6 +100,12 @@ module Dream
       @env[{d2vd0: i[0], d2vd1: i[1]}]?.not_nil![:d2vv].clone rescue nil
     end
 
+    def has_tag?(o : Bytes | Id, t : Bytes | Id)
+      oi = (o.is_a? Bytes) ? (digest o) : o
+      ti = (t.is_a? Bytes) ? (digest t) : t
+      @env.has_key?({o2to0: oi[0], o2to1: oi[1], o2tt0: ti[0], o2tt1: ti[1]})
+    end
+
     def get(o : Bytes | Id, &)
       oi = (o.is_a? Bytes) ? (digest o) : o
       @env.from({o2to0: oi[0], o2to1: oi[1], o2tt0: 0_u64, o2tt1: 0_u64}) do |o2t|

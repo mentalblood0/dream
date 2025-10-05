@@ -78,6 +78,7 @@ describe Dream do
       searches = (1..searches_count).map { tags.sample 2, rnd }
 
       objects.each { |oid, tags| ind.add oid, tags }
+      objects.each { |o, tt| tt.each { |t| (ind.has_tag? o, t).should eq true } }
 
       objects.each { |oid, tags| (ind.get oid).map { |i| ind[i]?.not_nil! }.sort.should eq tags }
       searches.each do |tags|
