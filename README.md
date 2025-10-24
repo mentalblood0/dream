@@ -1,6 +1,6 @@
 # 🧶 dream
 
-Tagged objects index and search engine with advanced algorithm
+Tagged objects index and search engine with advanced algorithm. Backed with [lawn](https://github.com/mentalblood0/lawn)
 
 ## Installation
 

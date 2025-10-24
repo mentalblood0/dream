@@ -1,233 +1,194 @@
+require "log"
 require "yaml"
 
-require "sophia"
+require "lawn/Database"
 require "xxhash128"
 
 module Dream
-  Sophia.define_env Env, {t2o: {key: {t2ot0: UInt64,
-                                      t2ot1: UInt64,
-                                      t2oo0: UInt64,
-                                      t2oo1: UInt64}},
-                          o2t: {key: {o2to0: UInt64,
-                                      o2to1: UInt64,
-                                      o2tt0: UInt64,
-                                      o2tt1: UInt64}},
-                          d2v: {key: {d2vd0: UInt64,
-                                      d2vd1: UInt64},
-                                value: {d2vv: Bytes}},
-                          c: {key: {ti0: UInt64,
-                                    ti1: UInt64},
-                              value: {c: UInt64}}}
-
-  alias Id = {UInt64, UInt64}
-
-  struct T2o
-    getter tup : {t2ot0: UInt64, t2ot1: UInt64, t2oo0: UInt64, t2oo1: UInt64}
-
-    def initialize(@tup)
-    end
-
-    def initialize(t : Id, o : Id)
-      @tup = {t2ot0: t[0], t2ot1: t[1], t2oo0: o[0], t2oo1: o[1]}
-    end
-
-    def t
-      {@tup[:t2ot0], @tup[:t2ot1]}
-    end
-
-    def o
-      {@tup[:t2oo0], @tup[:t2oo1]}
-    end
-
-    def >=(another : T2o)
-      (@tup[:t2oo0] >= another.tup[:t2oo0]) ||
-        ((@tup[:t2oo0] == another.tup[:t2oo0]) && (@tup[:t2oo1] >= another.tup[:t2oo1]))
-    end
+  def self.digest(source : Bytes)
+    digest = LibXxhash.xxhash128 source, source.size, 0
+    result = Bytes.new 16
+    IO::ByteFormat::BigEndian.encode digest.high64, result[0..7]
+    IO::ByteFormat::BigEndian.encode digest.low64, result[8..15]
+    result
   end
 
   class Index
     include YAML::Serializable
     include YAML::Serializable::Strict
 
-    getter env : Env
+    record Id, value : Bytes
 
-    @[YAML::Field(ignore: true)]
-    property intx = false
+    TAGS_TO_OBJECTS = 0_u8
+    OBJECTS_TO_TAGS = 1_u8
+    IDS_TO_SOURCES  = 2_u8
 
-    def initialize(@env : Env)
-    end
+    class Transaction
+      getter transaction : Lawn::Transaction
 
-    def transaction(&)
-      if @intx
-        yield self
-      else
-        @env.transaction do |tx|
-          r = Index.new tx
-          r.intx = true
-          yield r
+      def initialize(@transaction)
+      end
+
+      def add(object : Bytes | Id, tags : Array(Bytes | Id))
+        Log.debug { "#{self.class}.add object: #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}, tags: #{tags.map { |tag| tag.is_a?(Bytes) ? tag.hexstring : tag.value.hexstring }}" }
+        object_id = object.is_a?(Bytes) ? Dream.digest(object) : object.value
+        @transaction.set IDS_TO_SOURCES, object_id, object if object.is_a? Bytes
+        tags.each do |tag|
+          tag_id = tag.is_a?(Bytes) ? Dream.digest(tag) : tag.value
+          @transaction.set TAGS_TO_OBJECTS, tag_id + object_id
+          @transaction.set OBJECTS_TO_TAGS, object_id + tag_id
+          @transaction.set IDS_TO_SOURCES, tag_id, tag if tag.is_a? Bytes
         end
+        self
       end
-    end
 
-    protected def digest(s : Bytes)
-      d = LibXxhash.xxhash128 s, s.size, 0
-      {d.high64, d.low64}
-    end
-
-    protected def memoize(i : Id, v : Bytes)
-      @env << {d2vd0: i[0], d2vd1: i[1], d2vv: v} unless @env[{d2vd0: i[0], d2vd1: i[1]}]?
-    end
-
-    protected def forget(i : Id)
-      @env.delete({d2vd0: i[0], d2vd1: i[1]})
-    end
-
-    def add(o : Bytes | Id, ts : Array(Bytes | Id))
-      oi = (o.is_a? Bytes) ? (digest o) : o
-      transaction do |tx|
-        tx.memoize oi, o if o.is_a? Bytes
-        ts.each do |t|
-          ti = (t.is_a? Bytes) ? (digest t) : t
-          tx.memoize ti, t if t.is_a? Bytes
-          tx.env << {t2ot0: ti[0], t2ot1: ti[1], t2oo0: oi[0], t2oo1: oi[1]}
-          tx.env << {o2to0: oi[0], o2to1: oi[1], o2tt0: ti[0], o2tt1: ti[1]}
-          tx.env << {ti0: ti[0], ti1: ti[1], c: (@env[{ti0: ti[0], ti1: ti[1]}]?.not_nil![:c] rescue 0_u64) + 1}
+      def delete(object : Bytes | Id)
+        Log.debug { "#{self.class}.delete #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}" }
+        object_id = object.is_a?(Bytes) ? Dream.digest(object) : object.value
+        @transaction.delete IDS_TO_SOURCES, object_id if object.is_a? Bytes
+        @transaction.database.tables[OBJECTS_TO_TAGS].each(from: object_id) do |current_object_to_tag, _|
+          current_object_id = current_object_to_tag[..15]
+          break unless current_object_id == object_id
+          current_tag_id = current_object_to_tag[16..]
+          @transaction.delete TAGS_TO_OBJECTS, current_tag_id + current_object_id
+          @transaction.delete OBJECTS_TO_TAGS, current_object_to_tag
         end
+        self
       end
-    end
 
-    def []?(i : Id)
-      @env[{d2vd0: i[0], d2vd1: i[1]}]?.not_nil![:d2vv].clone rescue nil
-    end
-
-    def has_tag?(o : Bytes | Id, t : Bytes | Id)
-      oi = (o.is_a? Bytes) ? (digest o) : o
-      ti = (t.is_a? Bytes) ? (digest t) : t
-      @env.has_key?({o2to0: oi[0], o2to1: oi[1], o2tt0: ti[0], o2tt1: ti[1]})
-    end
-
-    def get(o : Bytes | Id, &)
-      oi = (o.is_a? Bytes) ? (digest o) : o
-      @env.from({o2to0: oi[0], o2to1: oi[1], o2tt0: 0_u64, o2tt1: 0_u64}) do |o2t|
-        break unless {o2t[:o2to0], o2t[:o2to1]} == oi
-        yield({o2t[:o2tt0], o2t[:o2tt1]})
-      end
-    end
-
-    def get(o : Bytes | Id) : Array(Id)
-      r = [] of Id
-      get(o) { |t| r << t }
-      r
-    end
-
-    def delete(o : Bytes | Id)
-      oi = (o.is_a? Bytes) ? (digest o) : o
-      transaction do |tx|
-        @env.from({o2to0: oi[0], o2to1: oi[1], o2tt0: 0_u64, o2tt1: 0_u64}) do |o2t|
-          break unless {o2t[:o2to0], o2t[:o2to1]} == oi
-          ti = {o2t[:o2tt0], o2t[:o2tt1]}
-          tx.env.delete({t2ot0: ti[0], t2ot1: ti[1], t2oo0: oi[0], t2oo1: oi[1]})
-          tx.env.delete({o2to0: ti[0], o2to1: ti[1], o2tt0: oi[0], o2tt1: oi[1]})
-          tx.env << {ti0: ti[0], ti1: ti[1], c: (@env[{ti0: ti[0], ti1: ti[1]}]?.not_nil![:c] - 1 rescue 0_u64)}
+      def delete(object : Bytes | Id, tags : Array(Bytes | Id))
+        Log.debug { "#{self.class}.delete object: #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}, tags: #{tags.map { |tag| tag.is_a?(Bytes) ? tag.hexstring : tag.value.hexstring }}" }
+        object_id = object.is_a?(Bytes) ? Dream.digest(object) : object.value
+        tags.each do |tag|
+          tag_id = tag.is_a?(Bytes) ? Dream.digest(tag) : tag.value
+          @transaction.delete TAGS_TO_OBJECTS, tag_id + object_id
+          @transaction.delete OBJECTS_TO_TAGS, object_id + tag_id
         end
-        tx.forget oi if o.is_a? Bytes
-      end
-    end
-
-    def delete(o : Bytes | Id, ts : Array(Bytes | Id))
-      oi = (o.is_a? Bytes) ? (digest o) : o
-      transaction do |tx|
-        ts.each do |t|
-          ti = (t.is_a? Bytes) ? (digest t) : t
-          tx.env.delete({t2ot0: ti[0], t2ot1: ti[1], t2oo0: oi[0], t2oo1: oi[1]})
-          tx.env.delete({o2to0: oi[0], o2to1: oi[1], o2tt0: ti[0], o2tt1: ti[1]})
-          tx.env << {ti0: ti[0], ti1: ti[1], c: (@env[{ti0: ti[0], ti1: ti[1]}]?.not_nil![:c] - 1 rescue 0_u64)}
-        end
-      end
-      transaction do |tx|
-        tx.env.from({o2to0: oi[0], o2to1: oi[1], o2tt0: 0_u64, o2tt1: 0_u64}) do |o2t|
-          if {o2t[:o2to0], o2t[:o2to1]} == oi
-            return
+        @transaction.database.tables[OBJECTS_TO_TAGS].each(from: object_id) do |current_object_to_tag, _|
+          current_object_id = current_object_to_tag[..15]
+          if current_object_id == object_id
+            return self
           else
             break
           end
         end
-        tx.forget oi if o.is_a? Bytes
+        @transaction.delete IDS_TO_SOURCES, object_id
+        self
+      end
+
+      def commit
+        @transaction.commit
       end
     end
 
-    def find(present : Array(Bytes | Id), absent : Array(Bytes | Id) = [] of Bytes | Id, from : Id? = nil, &)
-      ais = absent.compact_map { |t| (t.is_a? Bytes) ? (digest t) : t }
-      ais.sort_by! { |ti| @env[{ti0: ti[0], ti1: ti[1]}]?.not_nil![:c] rescue UInt64::MAX }
-      ais.reverse!
+    getter database : Lawn::Database
 
-      pis = present.map { |t| (t.is_a? Bytes) ? (digest t) : t }
-      pis.sort_by! { |ti| @env[{ti0: ti[0], ti1: ti[1]}]?.not_nil![:c] rescue return }
+    def initialize(@database)
+    end
 
-      if pis.size == 1
-        ti = pis.first
-        @env.from((T2o.new ti, (from ? from : {0_u64, 0_u64})).tup, from ? ">" : ">=") do |t2o|
-          break if {t2o[:t2ot0], t2o[:t2ot1]} != ti
-          yield({t2o[:t2oo0], t2o[:t2oo1]}) if ais.all? { |ai| !@env.has_key? (T2o.new ai, (T2o.new t2o).o).tup }
+    def transaction
+      Transaction.new @database.transaction
+    end
+
+    def []?(id : Id)
+      Log.debug { "#{self.class}[#{id.value.hexstring}]?" }
+      @database.tables[IDS_TO_SOURCES].get id.value
+    end
+
+    def has_tag?(object : Bytes | Id, tag : Bytes | Id)
+      Log.debug { "#{self.class}.has_tag? object: #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}, tag: #{tag.is_a?(Bytes) ? tag.hexstring : tag.value.hexstring}" }
+      object_id = object.is_a?(Bytes) ? Dream.digest(object) : object
+      tag_id = tag.is_a?(Bytes) ? Dream.digest(tag) : tag
+      @database.tables[OBJECTS_TO_TAGS].get(object_id + tag_id) != nil
+    end
+
+    def get(object : Bytes | Id, &)
+      Log.debug { "#{self.class}.get #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}" }
+      object_id = object.is_a?(Bytes) ? Dream.digest(object) : object
+      @database.tables[OBJECTS_TO_TAGS].each(from: object_id) do |current_object_to_tag, _|
+        current_object_id = current_object_to_tag[..15]
+        break unless current_object_id == object_id
+        current_tag_id = current_object_to_tag[16..]
+        yield current_tag_id
+      end
+    end
+
+    def get(object : Bytes | Id) : Array(Id)
+      result = [] of Id
+      get(object) { |tag_id| result << tag_id }
+      result
+    end
+
+    def find(present_tags : Array(Bytes | Id), absent_tags : Array(Bytes | Id) = [] of Bytes | Id, start_after_object : Id? = nil, &)
+      Log.debug { "#{self.class}.find present_tags: #{present_tags.map { |tag| tag.is_a?(Bytes) ? tag.hexstring : tag.value.hexstring }}, absent_tags: #{absent_tags.map { |tag| tag.is_a?(Bytes) ? tag.hexstring : tag.value.hexstring }}, start_after_object: #{start_after_object ? start_after_object.value.hexstring : nil}" }
+      absent_tags_ids = absent_tags.compact_map { |tag| tag.is_a?(Bytes) ? Dream.digest(tag) : tag.value }
+      present_tags_ids = present_tags.map { |tag| tag.is_a?(Bytes) ? Dream.digest(tag) : tag.value }
+
+      if present_tags_ids.size == 1
+        tag_id = present_tags_ids.first
+        @database.tables[TAGS_TO_OBJECTS].each(from: start_after_object ? tag_id + start_after_object : tag_id) do |current_tag_to_object, _|
+          current_tag_id = current_tag_to_object[..15]
+          break unless current_tag_id == tag_id
+          current_object_id = current_tag_to_object[16..]
+          yield Id.new(current_object_id) if absent_tags_ids.all? { |tag_id| @database.tables[TAGS_TO_OBJECTS].get(tag_id + current_object_id) == nil }
         end
         return
       end
 
-      cs = [] of Env::T2oCursor
+      cursors = [] of Lawn::Table::Cursor(Int64) # TAGS_TO_OBJECTS
 
-      i1 = 0
-      i2 = 1
+      index_1 = 0
+      index_2 = 1
       loop do
-        if cs.size == present.size && cs.all? { |c| (T2o.new c.data.not_nil!).o == (T2o.new cs.first.data.not_nil!).o }
-          if ais.all? { |ai| !@env.has_key? (T2o.new ai, (T2o.new cs.first.data.not_nil!).o).tup }
-            yield({cs.first.data.not_nil![:t2oo0], cs.first.data.not_nil![:t2oo1]})
-          end
-          return unless cs.first.next && ((T2o.new cs.first.data.not_nil!).t == pis.first)
-          i1 = 0
-          i2 = 1
+        if cursors.size == present_tags_ids.size && cursors.all? { |cursor| cursor.keyvalue.not_nil![0][16..] == cursors.first.keyvalue.not_nil![0][16..] }
+          yield Id.new(cursors.first.keyvalue.not_nil![0][16..]) if absent_tags_ids.all? { |tag_id| @database.tables[TAGS_TO_OBJECTS].get(tag_id + cursors.first.keyvalue.not_nil![0][16..]) == nil }
+          return unless cursors.first.next && (cursors.first.keyvalue.not_nil![0][..15] == present_tags_ids.first)
+          index_1 = 0
+          index_2 = 1
         end
 
-        if cs.size < present.size && cs.size <= i1
-          if i1 == 0
-            c = @env.cursor((T2o.new pis[i1], (from ? from : {0_u64, 0_u64})).tup, from ? ">" : ">=")
+        if (cursors.size < present_tags_ids.size) && (cursors.size <= index_1)
+          if index_1 == 0
+            cursor = @database.tables[TAGS_TO_OBJECTS].cursor start_after_object ? present_tags_ids[index_1] + start_after_object : present_tags_ids[index_1]
           else
-            c = @env.cursor((T2o.new pis[i1], (T2o.new cs.last.data.not_nil!).o).tup)
+            cursor = @database.tables[TAGS_TO_OBJECTS].cursor cursors.last.keyvalue.not_nil![0][16..]
           end
-          return unless c.next && ((T2o.new c.data.not_nil!).t == pis[i1])
-          cs << c
+          cursor.next
+          return unless cursor.keyvalue && (cursor.keyvalue.not_nil![0][..15] == present_tags_ids[index_1])
+          cursors << cursor.as Lawn::Table::Cursor(Int64)
         end
-        c1 = cs[i1]
+        cursor_1 = cursors[index_1]
 
-        if cs.size < present.size && cs.size <= i2
-          c = @env.cursor((T2o.new pis[i2], (T2o.new cs.last.data.not_nil!).o).tup)
-          return unless c.next && ((T2o.new c.data.not_nil!).t == pis[i2])
-          cs << c
+        if (cursors.size < present_tags_ids.size) && (cursors.size <= index_2)
+          cursor = @database.tables[TAGS_TO_OBJECTS].cursor present_tags_ids[index_2] + cursors.last.keyvalue.not_nil![0][16..]
+          return unless cursor.next && (cursor.keyvalue.not_nil![0][..15] == present_tags_ids[index_2])
+          cursors << cursor.as Lawn::Table::Cursor(Int64)
         end
-        c2 = cs[i2]
+        cursor_2 = cursors[index_2]
 
-        until (T2o.new c2.data.not_nil!).o >= (T2o.new c1.data.not_nil!).o
-          return unless c2.next && ((T2o.new c2.data.not_nil!).t == pis[i2])
+        until cursor_2.keyvalue.not_nil![0][16..] >= cursor_1.keyvalue.not_nil![0][16..]
+          return unless cursor_2.next && (cursor_2.keyvalue.not_nil![0][..15] == present_tags_ids[index_2])
         end
-        if ((T2o.new c2.data.not_nil!).o == (T2o.new c1.data.not_nil!).o)
-          i1 = (i1 + 1) % present.size
-          i2 = (i2 + 1) % present.size
+        if cursor_2.keyvalue.not_nil![0][16..] >= cursor_1.keyvalue.not_nil![0][16..]
+          index_1 = (index_1 + 1) % present_tags_ids.size
+          index_2 = (index_2 + 1) % present_tags_ids.size
         else
-          until (T2o.new cs.first.data.not_nil!).o >= (T2o.new cs[i2].data.not_nil!).o
-            return unless cs.first.next && ((T2o.new cs.first.data.not_nil!).t == pis.first)
+          until cursors.first.keyvalue.not_nil![0][16..] >= cursors[index_2].keyvalue.not_nil![0][16..]
+            return unless cursors.first.next && (cursors.first.keyvalue.not_nil![0][..15] == present_tags_ids.first)
           end
-          i1 = 0
-          i2 = 1
+          index_1 = 0
+          index_2 = 1
         end
       end
     end
 
-    def find(present : Array(Bytes | Id), absent : Array(Bytes | Id) = [] of Bytes, limit : UInt64 = UInt64::MAX, from : Id? = nil) : Array(Id)
-      r = [] of Id
-      find(present, absent, from) do |o|
-        break if r.size == limit
-        r << o
+    def find(present_tags : Array(Bytes | Id), absent_tags : Array(Bytes | Id) = [] of Bytes, limit : UInt64 = UInt64::MAX, start_after_object : Id? = nil) : Array(Id)
+      result = [] of Id
+      find(present_tags, absent_tags, start_after_object) do |object_id|
+        break if result.size == limit
+        result << object_id
       end
-      r
+      result
     end
   end
 end
