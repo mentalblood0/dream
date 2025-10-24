@@ -25,4 +25,8 @@ index:
         path: /tmp/dream_lawn/ids_to_sources/index.idx
         cache_size: 128MB
 seed: 0
-
+generative:
+  tags: 8
+  objects: 100
+  tags_per_object: 3
+  searches: 1

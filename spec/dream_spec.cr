@@ -9,14 +9,18 @@ struct Slice(T)
   end
 end
 
-alias Config = {index: Dream::Index, seed: Int32}
+alias Config = {index: Dream::Index, seed: Int32, generative: {tags: Int32, objects: Int32, tags_per_object: Int32, searches: Int32}}
 config = Config.from_yaml File.read ENV["SPEC_CONFIG_PATH"]
 rnd = Random.new config[:seed]
 index = config[:index]
 
+Spec.before_each do
+  index.clear
+end
+
 describe Dream do
   describe "Index" do
-    it "simple test", focus: true do
+    it "simple test" do
       a = "a".to_slice
       b = "b".to_slice
       c = "c".to_slice
@@ -56,38 +60,38 @@ describe Dream do
       index.transaction.delete(o1).commit
       index.transaction.delete(o3).commit
     end
-    # it "generative test" do
-    #   rnd = Random.new 0
+    it "generative test" do
+      tags = (1..config[:generative][:tags]).map { rnd.random_bytes 16 }
+      objects = Hash.zip (1..config[:generative][:objects]).map { rnd.random_bytes 16 }, (1..config[:generative][:objects]).map { (tags.sample config[:generative][:tags_per_object], rnd).sort }
+      tags_to_objects = {} of Bytes => Set(Bytes)
+      objects.each { |object, tags| tags.each do |tag|
+        tags_to_objects[tag] = Set(Bytes).new unless tags_to_objects[tag]?
+        tags_to_objects[tag] << object
+      end }
+      searches = (1..config[:generative][:searches]).map { tags.sample 2, rnd }
 
-    #   tags_count = 8
-    #   objects_count = 100
-    #   tags_per_object_count = 3
-    #   searches_count = 10
+      transaction = index.transaction
+      objects.each { |object, tags| transaction.add object, tags }
+      transaction.commit
+      objects.each { |object, tags| tags.each { |tag| (index.has_tag? object, tag).should eq true } }
 
-    #   tags = (1..tags_count).map { rnd.random_bytes 16 }
-    #   objects = Hash.zip (1..objects_count).map { rnd.random_bytes 16 }, (1..objects_count).map { (tags.sample tags_per_object_count, rnd).sort }
-    #   t2o = {} of Bytes => Set(Bytes)
-    #   objects.each { |o, tt| tt.each do |t|
-    #     t2o[t] = Set(Bytes).new unless t2o[t]?
-    #     t2o[t] << o
-    #   end }
-    #   searches = (1..searches_count).map { tags.sample 2, rnd }
+      objects.each { |object, tags| (index.get object).map { |tag_id| index[tag_id]?.not_nil! }.sort.should eq tags }
+      searches.each do |tags|
+        result = index.find(tags).map { |i| index[i]?.not_nil! }.sort
+        correct = tags.map { |tag| tags_to_objects[tag] }.reduce { |acc, cur| acc &= cur }.to_a.sort
+        result.should eq correct
 
-    #   objects.each { |oid, tags| index.add oid, tags }
-    #   objects.each { |o, tt| tt.each { |t| (index.has_tag? o, t).should eq true } }
-
-    #   objects.each { |oid, tags| (index.get oid).map { |i| index[i]?.not_nil! }.sort.should eq tags }
-    #   searches.each do |tags|
-    #     r = index.find(tags).map { |i| index[i]?.not_nil! }.sort
-    #     correct = tags.map { |t| t2o[t] }.reduce { |acc, cur| acc &= cur }.to_a.sort
-    #     r.should eq correct
-
-    #     r = [] of Dream::Id
-    #     until (rp = index.find(tags, limit: 2_u64, from: (r.last rescue nil))).empty?
-    #       r += rp
-    #     end
-    #     r.map { |i| index[i]?.not_nil! }.sort.should eq correct
-    #   end
-    # end
+        # result = [] of Dream::Index::Id
+        # until (result_part = index.find(present_tags: tags, limit: 2_u64, start_after_object: (result.last rescue nil))).empty?
+        #   result += result_part
+        #   if result.size > correct.size
+        #     pp result
+        #     pp result_part
+        #     exit
+        #   end
+        # end
+        # result.map { |tag_id| index[tag_id]?.not_nil! }.sort.should eq correct
+      end
+    end
   end
 end

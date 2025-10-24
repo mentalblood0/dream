@@ -86,6 +86,10 @@ module Dream
     def initialize(@database)
     end
 
+    def clear
+      @database.clear
+    end
+
     def transaction
       Transaction.new @database.transaction
     end
@@ -109,7 +113,7 @@ module Dream
         current_object_id = current_object_to_tag[..15]
         break unless current_object_id == object_id
         current_tag_id = current_object_to_tag[16..]
-        yield current_tag_id
+        yield Id.new current_tag_id
       end
     end
 
@@ -126,7 +130,7 @@ module Dream
 
       if present_tags_ids.size == 1
         tag_id = present_tags_ids.first
-        @database.tables[TAGS_TO_OBJECTS].each(from: start_after_object ? tag_id + start_after_object : tag_id) do |current_tag_to_object, _|
+        @database.tables[TAGS_TO_OBJECTS].each(from: start_after_object ? tag_id + start_after_object.value : tag_id) do |current_tag_to_object, _|
           current_tag_id = current_tag_to_object[..15]
           break unless current_tag_id == tag_id
           current_object_id = current_tag_to_object[16..]
@@ -149,7 +153,7 @@ module Dream
 
         if (cursors.size < present_tags_ids.size) && (cursors.size <= index_1)
           if index_1 == 0
-            cursor = @database.tables[TAGS_TO_OBJECTS].cursor start_after_object ? present_tags_ids[index_1] + start_after_object : present_tags_ids[index_1]
+            cursor = @database.tables[TAGS_TO_OBJECTS].cursor start_after_object ? present_tags_ids[index_1] + start_after_object.value : present_tags_ids[index_1]
           else
             cursor = @database.tables[TAGS_TO_OBJECTS].cursor cursors.last.keyvalue.not_nil![0][16..]
           end
