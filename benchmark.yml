@@ -1,31 +1,30 @@
 index:
   database:
     log:
-      path: /tmp/dream_lawn/log.dat
+      path: /tmp/dream/log.dat
     tables:
     # TAGS_TO_OBJECTS
     - key_size: 32
       value_size: 0
-      data_storage_path: /tmp/dream_lawn/tags_to_objects/data.dat
+      data_storage_path: /tmp/dream/tags_to_objects/data.dat
       index:
-        path: /tmp/dream_lawn/tags_to_objects/index.idx
+        path: /tmp/dream/tags_to_objects/index.idx
         cache_size: 0MB
     # OBJECTS_TO_TAGS
     - key_size: 32
       value_size: 0
-      data_storage_path: /tmp/dream_lawn/objects_to_tags/data.dat
+      data_storage_path: /tmp/dream/objects_to_tags/data.dat
       index:
-        path: /tmp/dream_lawn/objects_to_tags/index.idx
+        path: /tmp/dream/objects_to_tags/index.idx
         cache_size: 0MB
     # IDS_TO_SOURCES
     - data_storage:
-        dir: /tmp/dream_lawn/ids_to_sources
+        dir: /tmp/dream/ids_to_sources
         max_element_size: 65536
       index:
-        path: /tmp/dream_lawn/ids_to_sources/index.idx
+        path: /tmp/dream/ids_to_sources/index.idx
         cache_size: 0MB
 seed: 0
-path: /tmp/dream
 tags: 100
 objects: 100000
 tags_per_object: 10

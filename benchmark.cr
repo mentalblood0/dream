@@ -4,7 +4,7 @@ require "benchmark"
 
 require "./src/dream.cr"
 
-alias Config = {index: Dream::Index, seed: Int32, path: String, tags: Int32, objects: Int32, tags_per_object: Int32}
+alias Config = {index: Dream::Index, seed: Int32, tags: Int32, objects: Int32, tags_per_object: Int32}
 config = Config.from_yaml File.read ENV["BENCHMARK_CONFIG_PATH"]
 random = Random.new config[:seed]
 index = config[:index]
@@ -22,12 +22,8 @@ transaction.commit
 
 Benchmark.ips do |benchmark|
   (1..4).each do |search_tags_count|
-    limit = 1
-    until limit >= config[:objects]
-      benchmark.report "in-memory: searching #{limit} objects by #{search_tags_count} tags" do
-        index.find tags.sample(search_tags_count, random), limit: limit
-      end
-      limit *= 10
+    benchmark.report "in-memory: searching all objects by #{search_tags_count} tags" do
+      index.find tags.sample search_tags_count, random
     end
   end
 end
@@ -36,12 +32,8 @@ index.database.checkpoint
 
 Benchmark.ips do |benchmark|
   (1..4).each do |search_tags_count|
-    limit = 1
-    until limit >= config[:objects]
-      benchmark.report "on-disk: searching #{limit} objects by #{search_tags_count} tags" do
-        index.find tags.sample(search_tags_count, random), limit: limit
-      end
-      limit *= 10
+    benchmark.report "on-disk: searching all objects by #{search_tags_count} tags" do
+      index.find tags.sample search_tags_count, random
     end
   end
 end
