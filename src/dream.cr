@@ -13,73 +13,73 @@ module Dream
     result
   end
 
+  record Id, value : Bytes
+
+  TAGS_TO_OBJECTS = 0_u8
+  OBJECTS_TO_TAGS = 1_u8
+  IDS_TO_SOURCES  = 2_u8
+
+  class Transaction
+    getter transaction : Lawn::Transaction
+
+    def initialize(@transaction)
+    end
+
+    def add(object : Bytes | Id, tags : Array(Bytes | Id))
+      Log.debug { "#{self.class}.add object: #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}, tags: #{tags.map { |tag| tag.is_a?(Bytes) ? tag.hexstring : tag.value.hexstring }}" }
+      object_id = object.is_a?(Bytes) ? Dream.digest(object) : object.value
+      @transaction.set IDS_TO_SOURCES, object_id, object if object.is_a? Bytes
+      tags.each do |tag|
+        tag_id = tag.is_a?(Bytes) ? Dream.digest(tag) : tag.value
+        @transaction.set TAGS_TO_OBJECTS, tag_id + object_id
+        @transaction.set OBJECTS_TO_TAGS, object_id + tag_id
+        @transaction.set IDS_TO_SOURCES, tag_id, tag if tag.is_a? Bytes
+      end
+      self
+    end
+
+    def delete(object : Bytes | Id)
+      Log.debug { "#{self.class}.delete #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}" }
+      object_id = object.is_a?(Bytes) ? Dream.digest(object) : object.value
+      @transaction.delete IDS_TO_SOURCES, object_id if object.is_a? Bytes
+      @transaction.database.tables[OBJECTS_TO_TAGS].each(from: object_id) do |current_object_to_tag, _|
+        current_object_id = current_object_to_tag[..15]
+        break unless current_object_id == object_id
+        current_tag_id = current_object_to_tag[16..]
+        @transaction.delete TAGS_TO_OBJECTS, current_tag_id + current_object_id
+        @transaction.delete OBJECTS_TO_TAGS, current_object_to_tag
+      end
+      self
+    end
+
+    def delete(object : Bytes | Id, tags : Array(Bytes | Id))
+      Log.debug { "#{self.class}.delete object: #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}, tags: #{tags.map { |tag| tag.is_a?(Bytes) ? tag.hexstring : tag.value.hexstring }}" }
+      object_id = object.is_a?(Bytes) ? Dream.digest(object) : object.value
+      tags.each do |tag|
+        tag_id = tag.is_a?(Bytes) ? Dream.digest(tag) : tag.value
+        @transaction.delete TAGS_TO_OBJECTS, tag_id + object_id
+        @transaction.delete OBJECTS_TO_TAGS, object_id + tag_id
+      end
+      @transaction.database.tables[OBJECTS_TO_TAGS].each(from: object_id) do |current_object_to_tag, _|
+        current_object_id = current_object_to_tag[..15]
+        if current_object_id == object_id
+          return self
+        else
+          break
+        end
+      end
+      @transaction.delete IDS_TO_SOURCES, object_id
+      self
+    end
+
+    def commit
+      @transaction.commit
+    end
+  end
+
   class Index
     include YAML::Serializable
     include YAML::Serializable::Strict
-
-    record Id, value : Bytes
-
-    TAGS_TO_OBJECTS = 0_u8
-    OBJECTS_TO_TAGS = 1_u8
-    IDS_TO_SOURCES  = 2_u8
-
-    class Transaction
-      getter transaction : Lawn::Transaction
-
-      def initialize(@transaction)
-      end
-
-      def add(object : Bytes | Id, tags : Array(Bytes | Id))
-        Log.debug { "#{self.class}.add object: #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}, tags: #{tags.map { |tag| tag.is_a?(Bytes) ? tag.hexstring : tag.value.hexstring }}" }
-        object_id = object.is_a?(Bytes) ? Dream.digest(object) : object.value
-        @transaction.set IDS_TO_SOURCES, object_id, object if object.is_a? Bytes
-        tags.each do |tag|
-          tag_id = tag.is_a?(Bytes) ? Dream.digest(tag) : tag.value
-          @transaction.set TAGS_TO_OBJECTS, tag_id + object_id
-          @transaction.set OBJECTS_TO_TAGS, object_id + tag_id
-          @transaction.set IDS_TO_SOURCES, tag_id, tag if tag.is_a? Bytes
-        end
-        self
-      end
-
-      def delete(object : Bytes | Id)
-        Log.debug { "#{self.class}.delete #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}" }
-        object_id = object.is_a?(Bytes) ? Dream.digest(object) : object.value
-        @transaction.delete IDS_TO_SOURCES, object_id if object.is_a? Bytes
-        @transaction.database.tables[OBJECTS_TO_TAGS].each(from: object_id) do |current_object_to_tag, _|
-          current_object_id = current_object_to_tag[..15]
-          break unless current_object_id == object_id
-          current_tag_id = current_object_to_tag[16..]
-          @transaction.delete TAGS_TO_OBJECTS, current_tag_id + current_object_id
-          @transaction.delete OBJECTS_TO_TAGS, current_object_to_tag
-        end
-        self
-      end
-
-      def delete(object : Bytes | Id, tags : Array(Bytes | Id))
-        Log.debug { "#{self.class}.delete object: #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}, tags: #{tags.map { |tag| tag.is_a?(Bytes) ? tag.hexstring : tag.value.hexstring }}" }
-        object_id = object.is_a?(Bytes) ? Dream.digest(object) : object.value
-        tags.each do |tag|
-          tag_id = tag.is_a?(Bytes) ? Dream.digest(tag) : tag.value
-          @transaction.delete TAGS_TO_OBJECTS, tag_id + object_id
-          @transaction.delete OBJECTS_TO_TAGS, object_id + tag_id
-        end
-        @transaction.database.tables[OBJECTS_TO_TAGS].each(from: object_id) do |current_object_to_tag, _|
-          current_object_id = current_object_to_tag[..15]
-          if current_object_id == object_id
-            return self
-          else
-            break
-          end
-        end
-        @transaction.delete IDS_TO_SOURCES, object_id
-        self
-      end
-
-      def commit
-        @transaction.commit
-      end
-    end
 
     getter database : Lawn::Database
 
@@ -186,7 +186,7 @@ module Dream
       end
     end
 
-    def find(present_tags : Array(Bytes | Id), absent_tags : Array(Bytes | Id) = [] of Bytes, limit : UInt64 = UInt64::MAX, start_after_object : Id? = nil) : Array(Id)
+    def find(present_tags : Array(Bytes | Id), absent_tags : Array(Bytes | Id) = [] of Bytes, limit : Int32 = Int32::MAX, start_after_object : Id? = nil) : Array(Id)
       result = [] of Id
       find(present_tags, absent_tags, start_after_object) do |object_id|
         break if result.size == limit

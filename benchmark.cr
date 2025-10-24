@@ -1,47 +1,45 @@
+require "spec"
 require "yaml"
 require "benchmark"
 
 require "./src/dream.cr"
 
-config = NamedTuple(
-  seed: Int32,
-  path: String,
-  tags_count: UInt32,
-  objects_count: UInt32,
-  tags_per_object_count: UInt32).from_yaml File.read ARGV.first
+alias Config = {index: Dream::Index, seed: Int32, path: String, tags: Int32, objects: Int32, tags_per_object: Int32}
+config = Config.from_yaml File.read ENV["BENCHMARK_CONFIG_PATH"]
+random = Random.new config[:seed]
+index = config[:index]
+index.clear
 
-rnd = Random.new config[:seed]
+tags = Array.new config[:tags] { random.random_bytes 16 }
 
-tags = Array.new config[:tags_count] { rnd.random_bytes 16 }
+transaction = index.transaction
+config[:objects].times do
+  transaction.add(
+    random.random_bytes(16),
+    tags[0..random.rand(config[:tags_per_object]..tags.size - 1)].sample(config[:tags_per_object], random))
+end
+transaction.commit
 
-ind = Dream::Index.from_yaml <<-YAML
-env:
-  opts:
-    sophia:
-      path: /tmp/dream
-    db:
-      t2o: &ddbs
-        compression: zstd
-      o2t:
-        *ddbs
-      d2v:
-        *ddbs
-      c:
-        *ddbs
-YAML
-
-config[:objects_count].times do
-  ind.add(
-    rnd.random_bytes(16),
-    tags[0..rnd.rand(config[:tags_per_object_count]..tags.size.to_u32 - 1)].sample(config[:tags_per_object_count], rnd))
+Benchmark.ips do |benchmark|
+  (1..4).each do |search_tags_count|
+    limit = 1
+    until limit >= config[:objects]
+      benchmark.report "in-memory: searching #{limit} objects by #{search_tags_count} tags" do
+        index.find tags.sample(search_tags_count, random), limit: limit
+      end
+      limit *= 10
+    end
+  end
 end
 
-Benchmark.ips do |b|
-  (1..4).each do |tc|
-    limit = 1_u32
-    until limit >= config[:objects_count]
-      b.report "searching #{limit} objects by #{tc} tags" do
-        ind.find tags.sample(tc, rnd), limit: limit
+index.database.checkpoint
+
+Benchmark.ips do |benchmark|
+  (1..4).each do |search_tags_count|
+    limit = 1
+    until limit >= config[:objects]
+      benchmark.report "on-disk: searching #{limit} objects by #{search_tags_count} tags" do
+        index.find tags.sample(search_tags_count, random), limit: limit
       end
       limit *= 10
     end
