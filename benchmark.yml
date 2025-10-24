@@ -28,3 +28,5 @@ seed: 0
 tags: 100
 objects: 100000
 tags_per_object: 10
+benchmarks:
+- on-disk

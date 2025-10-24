@@ -1,10 +1,9 @@
-require "spec"
 require "yaml"
 require "benchmark"
 
 require "./src/dream.cr"
 
-alias Config = {index: Dream::Index, seed: Int32, tags: Int32, objects: Int32, tags_per_object: Int32}
+alias Config = {index: Dream::Index, seed: Int32, tags: Int32, objects: Int32, tags_per_object: Int32, benchmarks: Array(String)}
 config = Config.from_yaml File.read ENV["BENCHMARK_CONFIG_PATH"]
 random = Random.new config[:seed]
 index = config[:index]
@@ -20,20 +19,23 @@ config[:objects].times do
 end
 transaction.commit
 
-Benchmark.ips do |benchmark|
-  (1..4).each do |search_tags_count|
-    benchmark.report "in-memory: searching all objects by #{search_tags_count} tags" do
-      index.find tags.sample search_tags_count, random
+if config[:benchmarks].includes? "in-memory"
+  Benchmark.ips do |benchmark|
+    (1..4).each do |search_tags_count|
+      benchmark.report "in-memory: searching all objects by #{search_tags_count} tags" do
+        index.find tags.sample search_tags_count, random
+      end
     end
   end
 end
 
-index.database.checkpoint
-
-Benchmark.ips do |benchmark|
-  (1..4).each do |search_tags_count|
-    benchmark.report "on-disk: searching all objects by #{search_tags_count} tags" do
-      index.find tags.sample search_tags_count, random
+if config[:benchmarks].includes? "on-disk"
+  index.database.checkpoint
+  Benchmark.ips do |benchmark|
+    (1..4).each do |search_tags_count|
+      benchmark.report "on-disk: searching all objects by #{search_tags_count} tags" do
+        index.find tags.sample search_tags_count, random
+      end
     end
   end
 end
