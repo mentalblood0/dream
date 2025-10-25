@@ -42,7 +42,7 @@ module Dream
       Log.debug { "#{self.class}.delete #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}" }
       object_id = object.is_a?(Bytes) ? Dream.digest(object) : object.value
       @transaction.delete IDS_TO_SOURCES, object_id if object.is_a? Bytes
-      @transaction.database.tables[OBJECTS_TO_TAGS].each(from: object_id) do |current_object_to_tag, _|
+      @transaction.database.tables[OBJECTS_TO_TAGS].cursor(from: object_id).each_next do |current_object_to_tag, _|
         current_object_id = current_object_to_tag[..15]
         break unless current_object_id == object_id
         current_tag_id = current_object_to_tag[16..]
@@ -60,7 +60,7 @@ module Dream
         @transaction.delete TAGS_TO_OBJECTS, tag_id + object_id
         @transaction.delete OBJECTS_TO_TAGS, object_id + tag_id
       end
-      @transaction.database.tables[OBJECTS_TO_TAGS].each(from: object_id) do |current_object_to_tag, _|
+      @transaction.database.tables[OBJECTS_TO_TAGS].cursor(from: object_id).each_next do |current_object_to_tag, _|
         current_object_id = current_object_to_tag[..15]
         if current_object_id == object_id
           return self
@@ -109,7 +109,7 @@ module Dream
     def get(object : Bytes | Id, &)
       Log.debug { "#{self.class}.get #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}" }
       object_id = object.is_a?(Bytes) ? Dream.digest(object) : object
-      @database.tables[OBJECTS_TO_TAGS].each(from: object_id) do |current_object_to_tag, _|
+      @database.tables[OBJECTS_TO_TAGS].cursor(from: object_id).each_next do |current_object_to_tag, _|
         current_object_id = current_object_to_tag[..15]
         break unless current_object_id == object_id
         current_tag_id = current_object_to_tag[16..]
@@ -130,7 +130,7 @@ module Dream
 
       if present_tags_ids.size == 1
         tag_id = present_tags_ids.first
-        @database.tables[TAGS_TO_OBJECTS].each(from: start_after_object ? tag_id + start_after_object.value : tag_id, including_from: start_after_object.nil?) do |current_tag_to_object, _|
+        @database.tables[TAGS_TO_OBJECTS].cursor(from: start_after_object ? tag_id + start_after_object.value : tag_id, including_from: start_after_object.nil?).each_next do |current_tag_to_object, _|
           current_tag_id = current_tag_to_object[..15]
           break unless current_tag_id == tag_id
           current_object_id = current_tag_to_object[16..]
