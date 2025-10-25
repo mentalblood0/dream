@@ -81,16 +81,12 @@ describe Dream do
         correct = tags.map { |tag| tags_to_objects[tag] }.reduce { |acc, cur| acc &= cur }.to_a.sort
         result.should eq correct
 
-        # result = [] of Dream::Index::Id
-        # until (result_part = index.find(present_tags: tags, limit: 2_u64, start_after_object: (result.last rescue nil))).empty?
-        #   result += result_part
-        #   if result.size > correct.size
-        #     pp result
-        #     pp result_part
-        #     exit
-        #   end
-        # end
-        # result.map { |tag_id| index[tag_id]?.not_nil! }.sort.should eq correct
+        result = [] of Dream::Id
+        until (result_part = index.find(present_tags: tags, limit: 2_u64, start_after_object: (result.last rescue nil))).empty?
+          result += result_part
+          (result.size <= correct.size).should eq true
+        end
+        result.map { |tag_id| index[tag_id]?.not_nil! }.sort.should eq correct
       end
     end
   end

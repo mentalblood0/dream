@@ -29,4 +29,4 @@ generative:
   tags: 8
   objects: 100
   tags_per_object: 3
-  searches: 1
+  searches: 100

@@ -130,7 +130,7 @@ module Dream
 
       if present_tags_ids.size == 1
         tag_id = present_tags_ids.first
-        @database.tables[TAGS_TO_OBJECTS].each(from: start_after_object ? tag_id + start_after_object.value : tag_id) do |current_tag_to_object, _|
+        @database.tables[TAGS_TO_OBJECTS].each(from: start_after_object ? tag_id + start_after_object.value : tag_id, including_from: start_after_object.nil?) do |current_tag_to_object, _|
           current_tag_id = current_tag_to_object[..15]
           break unless current_tag_id == tag_id
           current_object_id = current_tag_to_object[16..]
@@ -153,9 +153,9 @@ module Dream
 
         if (cursors.size < present_tags_ids.size) && (cursors.size <= index_1)
           if index_1 == 0
-            cursor = @database.tables[TAGS_TO_OBJECTS].cursor start_after_object ? present_tags_ids[index_1] + start_after_object.value : present_tags_ids[index_1]
+            cursor = @database.tables[TAGS_TO_OBJECTS].cursor from: start_after_object ? present_tags_ids[index_1] + start_after_object.value : present_tags_ids[index_1], including_from: start_after_object.nil?
           else
-            cursor = @database.tables[TAGS_TO_OBJECTS].cursor cursors.last.keyvalue.not_nil![0][16..]
+            cursor = @database.tables[TAGS_TO_OBJECTS].cursor from: cursors.last.keyvalue.not_nil![0][16..]
           end
           cursor.next
           return unless cursor.keyvalue && (cursor.keyvalue.not_nil![0][..15] == present_tags_ids[index_1])
@@ -164,7 +164,7 @@ module Dream
         cursor_1 = cursors[index_1]
 
         if (cursors.size < present_tags_ids.size) && (cursors.size <= index_2)
-          cursor = @database.tables[TAGS_TO_OBJECTS].cursor present_tags_ids[index_2] + cursors.last.keyvalue.not_nil![0][16..]
+          cursor = @database.tables[TAGS_TO_OBJECTS].cursor from: present_tags_ids[index_2] + cursors.last.keyvalue.not_nil![0][16..]
           return unless cursor.next && (cursor.keyvalue.not_nil![0][..15] == present_tags_ids[index_2])
           cursors << cursor.as Lawn::Table::Cursor(Int64)
         end
