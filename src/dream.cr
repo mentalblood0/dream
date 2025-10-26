@@ -96,14 +96,14 @@ module Dream
 
     def []?(id : Id)
       Log.debug { "#{self.class}[#{id.value.hexstring}]?" }
-      @database.tables[IDS_TO_SOURCES].get id.value
+      @database.get IDS_TO_SOURCES, id.value
     end
 
     def has_tag?(object : Bytes | Id, tag : Bytes | Id)
       Log.debug { "#{self.class}.has_tag? object: #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}, tag: #{tag.is_a?(Bytes) ? tag.hexstring : tag.value.hexstring}" }
       object_id = object.is_a?(Bytes) ? Dream.digest(object) : object
       tag_id = tag.is_a?(Bytes) ? Dream.digest(tag) : tag
-      @database.tables[OBJECTS_TO_TAGS].get(object_id + tag_id) != nil
+      @database.get(OBJECTS_TO_TAGS, object_id + tag_id) != nil
     end
 
     def get(object : Bytes | Id, &)
@@ -134,7 +134,7 @@ module Dream
           current_tag_id = current_tag_to_object[..15]
           break unless current_tag_id == tag_id
           current_object_id = current_tag_to_object[16..]
-          yield Id.new(current_object_id) if absent_tags_ids.all? { |tag_id| @database.tables[TAGS_TO_OBJECTS].get(tag_id + current_object_id) == nil }
+          yield Id.new(current_object_id) if absent_tags_ids.all? { |tag_id| @database.get(TAGS_TO_OBJECTS, tag_id + current_object_id) == nil }
         end
         return
       end
@@ -145,7 +145,7 @@ module Dream
       index_2 = 1
       loop do
         if cursors.size == present_tags_ids.size && cursors.all? { |cursor| cursor.keyvalue.not_nil![0][16..] == cursors.first.keyvalue.not_nil![0][16..] }
-          yield Id.new(cursors.first.keyvalue.not_nil![0][16..]) if absent_tags_ids.all? { |tag_id| @database.tables[TAGS_TO_OBJECTS].get(tag_id + cursors.first.keyvalue.not_nil![0][16..]) == nil }
+          yield Id.new(cursors.first.keyvalue.not_nil![0][16..]) if absent_tags_ids.all? { |tag_id| @database.get(TAGS_TO_OBJECTS, tag_id + cursors.first.keyvalue.not_nil![0][16..]) == nil }
           return unless cursors.first.next && (cursors.first.keyvalue.not_nil![0][..15] == present_tags_ids.first)
           index_1 = 0
           index_2 = 1
