@@ -16,10 +16,10 @@ module Dream
 
   record Id, value : Bytes
 
-  TAGS_TO_OBJECTS = 0_u8
-  OBJECTS_TO_TAGS = 1_u8
-  IDS_TO_SOURCES  = 2_u8
-  TAGS_COUNTS     = 3_u8
+  TAGS_TO_OBJECTS        = 0_u8
+  OBJECTS_TO_TAGS        = 1_u8
+  IDS_TO_SOURCES         = 2_u8
+  TAGS_TO_OBJECTS_COUNTS = 3_u8
 
   class Transaction
     getter transaction : Lawn::Transaction
@@ -46,7 +46,7 @@ module Dream
         @transaction.set TAGS_TO_OBJECTS, tag_id + object_id
         @transaction.set OBJECTS_TO_TAGS, object_id + tag_id
         @transaction.set IDS_TO_SOURCES, tag_id, tag if tag.is_a? Bytes
-        @transaction.set TAGS_COUNTS, tag_id, number_to_bytes 1_u32 + ((current_count = @transaction.get(TAGS_COUNTS, tag_id)) ? number_from_bytes(current_count) : 0_u32)
+        @transaction.set TAGS_TO_OBJECTS_COUNTS, tag_id, number_to_bytes 1_u32 + ((current_count = @transaction.get(TAGS_TO_OBJECTS_COUNTS, tag_id)) ? number_from_bytes(current_count) : 0_u32)
       end
       self
     end
@@ -61,7 +61,7 @@ module Dream
         current_tag_id = current_object_to_tag[16..]
         @transaction.delete TAGS_TO_OBJECTS, current_tag_id + current_object_id
         @transaction.delete OBJECTS_TO_TAGS, current_object_to_tag
-        @transaction.set TAGS_COUNTS, current_tag_id, number_to_bytes number_from_bytes(@transaction.get(TAGS_COUNTS, current_tag_id).not_nil!) - 1
+        @transaction.set TAGS_TO_OBJECTS_COUNTS, current_tag_id, number_to_bytes number_from_bytes(@transaction.get(TAGS_TO_OBJECTS_COUNTS, current_tag_id).not_nil!) - 1
       end
       self
     end
@@ -74,7 +74,7 @@ module Dream
         if @transaction.get TAGS_TO_OBJECTS, tag_id + object_id
           @transaction.delete TAGS_TO_OBJECTS, tag_id + object_id
           @transaction.delete OBJECTS_TO_TAGS, object_id + tag_id
-          @transaction.set TAGS_COUNTS, tag_id, number_to_bytes number_from_bytes(@transaction.get(TAGS_COUNTS, tag_id).not_nil!) - 1
+          @transaction.set TAGS_TO_OBJECTS_COUNTS, tag_id, number_to_bytes number_from_bytes(@transaction.get(TAGS_TO_OBJECTS_COUNTS, tag_id).not_nil!) - 1
         end
       end
       @transaction.cursor(OBJECTS_TO_TAGS, from: object_id).each_next do |current_object_to_tag, _|
@@ -122,11 +122,11 @@ module Dream
       Log.debug { "#{self.class}.find present_tags: #{present_tags.map { |tag| tag.is_a?(Bytes) ? tag.hexstring : tag.value.hexstring }}, absent_tags: #{absent_tags.map { |tag| tag.is_a?(Bytes) ? tag.hexstring : tag.value.hexstring }}, start_after_object: #{start_after_object ? start_after_object.value.hexstring : nil}" }
 
       absent_tags_ids = absent_tags.compact_map { |tag| tag.is_a?(Bytes) ? Dream.digest(tag) : tag.value }
-      absent_tags_ids.sort_by! { |tag_id| number_from_bytes @transaction.get(TAGS_COUNTS, tag_id).not_nil! rescue UInt64::MAX }
+      absent_tags_ids.sort_by! { |tag_id| number_from_bytes @transaction.get(TAGS_TO_OBJECTS_COUNTS, tag_id).not_nil! rescue UInt64::MAX }
       absent_tags_ids.reverse!
 
       present_tags_ids = present_tags.map { |tag| tag.is_a?(Bytes) ? Dream.digest(tag) : tag.value }
-      present_tags_ids.sort_by! { |tag_id| number_from_bytes @transaction.get(TAGS_COUNTS, tag_id).not_nil! rescue return }
+      present_tags_ids.sort_by! { |tag_id| number_from_bytes @transaction.get(TAGS_TO_OBJECTS_COUNTS, tag_id).not_nil! rescue return }
 
       if present_tags_ids.size == 1
         tag_id = present_tags_ids.first
