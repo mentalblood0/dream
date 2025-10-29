@@ -216,5 +216,11 @@ module Dream
     def transaction
       Transaction.new @database.transaction
     end
+
+    def transaction(&)
+      result = transaction
+      yield result
+      result.commit
+    end
   end
 end

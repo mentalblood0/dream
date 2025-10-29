@@ -28,39 +28,37 @@ describe Dream do
       o2 = "o2".to_slice
       o3 = "o3".to_slice
 
-      transaction = index
-        .transaction
-        .add(o1, [a])
-        .add(o2, [a, b])
-        .add(o3, [a, b, c])
+      index.transaction do |transaction|
+        transaction
+          .add(o1, [a])
+          .add(o2, [a, b])
+          .add(o3, [a, b, c])
 
-      transaction.find([a, b, c], limit: 2).map { |i| transaction[i]?.not_nil! }.should eq [o3]
+        transaction.find([a, b, c], limit: 2).map { |i| transaction[i]?.not_nil! }.should eq [o3]
 
-      transaction.find([a, b]).map { |i| transaction[i]?.not_nil! }.should eq [o2, o3]
-      transaction.find([a, b], limit: 1).map { |i| transaction[i]?.not_nil! }.should eq [o2]
-      transaction.find([a]).map { |i| transaction[i]?.not_nil! }.sort.should eq [o1, o2, o3].sort
-      transaction.find([a], limit: 2).map { |i| transaction[i]?.not_nil! }.sort.should eq [o1, o2].sort
-      transaction.find([a], limit: 1).map { |i| transaction[i]?.not_nil! }.should eq [o2]
+        transaction.find([a, b]).map { |i| transaction[i]?.not_nil! }.should eq [o2, o3]
+        transaction.find([a, b], limit: 1).map { |i| transaction[i]?.not_nil! }.should eq [o2]
+        transaction.find([a]).map { |i| transaction[i]?.not_nil! }.sort.should eq [o1, o2, o3].sort
+        transaction.find([a], limit: 2).map { |i| transaction[i]?.not_nil! }.sort.should eq [o1, o2].sort
+        transaction.find([a], limit: 1).map { |i| transaction[i]?.not_nil! }.should eq [o2]
 
-      transaction.find([a], [a]).map { |i| transaction[i]?.not_nil! }.should eq [] of Bytes
-      transaction.find([a], [b]).map { |i| transaction[i]?.not_nil! }.should eq [o1]
-      transaction.find([a], [c]).map { |i| transaction[i]?.not_nil! }.sort.should eq [o1, o2].sort
-      transaction.find([b], [a]).map { |i| transaction[i]?.not_nil! }.should eq [] of Bytes
-      transaction.find([b], [c]).map { |i| transaction[i]?.not_nil! }.should eq [o2]
-      transaction.find([a, b], [c]).map { |i| transaction[i]?.not_nil! }.should eq [o2]
+        transaction.find([a], [a]).map { |i| transaction[i]?.not_nil! }.should eq [] of Bytes
+        transaction.find([a], [b]).map { |i| transaction[i]?.not_nil! }.should eq [o1]
+        transaction.find([a], [c]).map { |i| transaction[i]?.not_nil! }.sort.should eq [o1, o2].sort
+        transaction.find([b], [a]).map { |i| transaction[i]?.not_nil! }.should eq [] of Bytes
+        transaction.find([b], [c]).map { |i| transaction[i]?.not_nil! }.should eq [o2]
+        transaction.find([a, b], [c]).map { |i| transaction[i]?.not_nil! }.should eq [o2]
 
-      transaction.delete o3, [a, c]
-      transaction.find([a]).map { |i| transaction[i]?.not_nil! }.sort.should eq [o1, o2].sort
-      transaction.find([b]).map { |i| transaction[i]?.not_nil! }.should eq [o2, o3]
-      transaction.find([c]).map { |i| transaction[i]?.not_nil! }.should eq [] of Bytes
+        transaction.delete o3, [a, c]
+        transaction.find([a]).map { |i| transaction[i]?.not_nil! }.sort.should eq [o1, o2].sort
+        transaction.find([b]).map { |i| transaction[i]?.not_nil! }.should eq [o2, o3]
+        transaction.find([c]).map { |i| transaction[i]?.not_nil! }.should eq [] of Bytes
 
-      transaction.delete o2
-      transaction.find([a]).map { |i| transaction[i]?.not_nil! }.should eq [o1]
-      transaction.find([b]).map { |i| transaction[i]?.not_nil! }.should eq [o3]
-      transaction.find([c]).map { |i| transaction[i]?.not_nil! }.should eq [] of Bytes
-
-      transaction.delete o1
-      transaction.delete o3
+        transaction.delete o2
+        transaction.find([a]).map { |i| transaction[i]?.not_nil! }.should eq [o1]
+        transaction.find([b]).map { |i| transaction[i]?.not_nil! }.should eq [o3]
+        transaction.find([c]).map { |i| transaction[i]?.not_nil! }.should eq [] of Bytes
+      end
     end
     it "generative test" do
       tags = (1..config[:generative][:tags]).map { rnd.random_bytes 16 }
