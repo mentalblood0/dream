@@ -23,7 +23,9 @@ if config[:benchmarks].includes? "in-memory"
   Benchmark.ips do |benchmark|
     (1..4).each do |search_tags_count|
       benchmark.report "in-memory: searching all objects by #{search_tags_count} tags" do
-        index.find tags.sample search_tags_count, random
+        transaction = index.transaction
+        transaction.find tags.sample search_tags_count, random
+        transaction.commit
       end
     end
   end
@@ -34,7 +36,9 @@ if config[:benchmarks].includes? "on-disk"
   Benchmark.ips do |benchmark|
     (1..4).each do |search_tags_count|
       benchmark.report "on-disk: searching all objects by #{search_tags_count} tags" do
-        index.find tags.sample search_tags_count, random
+        transaction = index.transaction
+        transaction.find tags.sample search_tags_count, random
+        transaction.commit
       end
     end
   end

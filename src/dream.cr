@@ -2,6 +2,7 @@ require "log"
 require "yaml"
 
 require "lawn/Database"
+require "lawn/Transaction"
 require "xxhash128"
 
 module Dream
@@ -42,7 +43,7 @@ module Dream
       Log.debug { "#{self.class}.delete #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}" }
       object_id = object.is_a?(Bytes) ? Dream.digest(object) : object.value
       @transaction.delete IDS_TO_SOURCES, object_id if object.is_a? Bytes
-      @transaction.database.tables[OBJECTS_TO_TAGS].cursor(from: object_id).each_next do |current_object_to_tag, _|
+      @transaction.cursor(OBJECTS_TO_TAGS, from: object_id).each_next do |current_object_to_tag, _|
         current_object_id = current_object_to_tag[..15]
         break unless current_object_id == object_id
         current_tag_id = current_object_to_tag[16..]
@@ -60,7 +61,7 @@ module Dream
         @transaction.delete TAGS_TO_OBJECTS, tag_id + object_id
         @transaction.delete OBJECTS_TO_TAGS, object_id + tag_id
       end
-      @transaction.database.tables[OBJECTS_TO_TAGS].cursor(from: object_id).each_next do |current_object_to_tag, _|
+      @transaction.cursor(OBJECTS_TO_TAGS, from: object_id).each_next do |current_object_to_tag, _|
         current_object_id = current_object_to_tag[..15]
         if current_object_id == object_id
           return self
@@ -72,44 +73,22 @@ module Dream
       self
     end
 
-    def commit
-      @transaction.commit
-    end
-  end
-
-  class Index
-    include YAML::Serializable
-    include YAML::Serializable::Strict
-
-    getter database : Lawn::Database
-
-    def initialize(@database)
-    end
-
-    def clear
-      @database.clear
-    end
-
-    def transaction
-      Transaction.new @database.transaction
-    end
-
     def []?(id : Id)
       Log.debug { "#{self.class}[#{id.value.hexstring}]?" }
-      @database.get IDS_TO_SOURCES, id.value
+      @transaction.get IDS_TO_SOURCES, id.value
     end
 
     def has_tag?(object : Bytes | Id, tag : Bytes | Id)
       Log.debug { "#{self.class}.has_tag? object: #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}, tag: #{tag.is_a?(Bytes) ? tag.hexstring : tag.value.hexstring}" }
       object_id = object.is_a?(Bytes) ? Dream.digest(object) : object
       tag_id = tag.is_a?(Bytes) ? Dream.digest(tag) : tag
-      @database.get(OBJECTS_TO_TAGS, object_id + tag_id) != nil
+      @transaction.get(OBJECTS_TO_TAGS, object_id + tag_id) != nil
     end
 
     def get(object : Bytes | Id, &)
       Log.debug { "#{self.class}.get #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}" }
       object_id = object.is_a?(Bytes) ? Dream.digest(object) : object
-      @database.tables[OBJECTS_TO_TAGS].cursor(from: object_id).each_next do |current_object_to_tag, _|
+      @transaction.cursor(OBJECTS_TO_TAGS, from: object_id).each_next do |current_object_to_tag, _|
         current_object_id = current_object_to_tag[..15]
         break unless current_object_id == object_id
         current_tag_id = current_object_to_tag[16..]
@@ -130,22 +109,22 @@ module Dream
 
       if present_tags_ids.size == 1
         tag_id = present_tags_ids.first
-        @database.tables[TAGS_TO_OBJECTS].cursor(from: start_after_object ? tag_id + start_after_object.value : tag_id, including_from: start_after_object.nil?).each_next do |current_tag_to_object, _|
+        @transaction.cursor(TAGS_TO_OBJECTS, from: start_after_object ? tag_id + start_after_object.value : tag_id, including_from: start_after_object.nil?).each_next do |current_tag_to_object, _|
           current_tag_id = current_tag_to_object[..15]
           break unless current_tag_id == tag_id
           current_object_id = current_tag_to_object[16..]
-          yield Id.new(current_object_id) if absent_tags_ids.all? { |tag_id| @database.get(TAGS_TO_OBJECTS, tag_id + current_object_id) == nil }
+          yield Id.new(current_object_id) if absent_tags_ids.all? { |tag_id| @transaction.get(TAGS_TO_OBJECTS, tag_id + current_object_id) == nil }
         end
         return
       end
 
-      cursors = [] of Lawn::Table::Cursor(Int64) # TAGS_TO_OBJECTS
+      cursors = [] of Lawn::Transaction::Cursor(Int64) # TAGS_TO_OBJECTS
 
       index_1 = 0
       index_2 = 1
       loop do
         if cursors.size == present_tags_ids.size && cursors.all? { |cursor| cursor.keyvalue.not_nil![0][16..] == cursors.first.keyvalue.not_nil![0][16..] }
-          yield Id.new(cursors.first.keyvalue.not_nil![0][16..]) if absent_tags_ids.all? { |tag_id| @database.get(TAGS_TO_OBJECTS, tag_id + cursors.first.keyvalue.not_nil![0][16..]) == nil }
+          yield Id.new(cursors.first.keyvalue.not_nil![0][16..]) if absent_tags_ids.all? { |tag_id| @transaction.get(TAGS_TO_OBJECTS, tag_id + cursors.first.keyvalue.not_nil![0][16..]) == nil }
           return unless cursors.first.next && (cursors.first.keyvalue.not_nil![0][..15] == present_tags_ids.first)
           index_1 = 0
           index_2 = 1
@@ -153,20 +132,20 @@ module Dream
 
         if (cursors.size < present_tags_ids.size) && (cursors.size <= index_1)
           if index_1 == 0
-            cursor = @database.tables[TAGS_TO_OBJECTS].cursor from: start_after_object ? present_tags_ids[index_1] + start_after_object.value : present_tags_ids[index_1], including_from: start_after_object.nil?
+            cursor = @transaction.cursor TAGS_TO_OBJECTS, from: start_after_object ? present_tags_ids[index_1] + start_after_object.value : present_tags_ids[index_1], including_from: start_after_object.nil?
           else
-            cursor = @database.tables[TAGS_TO_OBJECTS].cursor from: cursors.last.keyvalue.not_nil![0][16..]
+            cursor = @transaction.cursor TAGS_TO_OBJECTS, from: cursors.last.keyvalue.not_nil![0][16..]
           end
           cursor.next
           return unless cursor.keyvalue && (cursor.keyvalue.not_nil![0][..15] == present_tags_ids[index_1])
-          cursors << cursor.as Lawn::Table::Cursor(Int64)
+          cursors << cursor.as Lawn::Transaction::Cursor(Int64)
         end
         cursor_1 = cursors[index_1]
 
         if (cursors.size < present_tags_ids.size) && (cursors.size <= index_2)
-          cursor = @database.tables[TAGS_TO_OBJECTS].cursor from: present_tags_ids[index_2] + cursors.last.keyvalue.not_nil![0][16..]
+          cursor = @transaction.cursor TAGS_TO_OBJECTS, from: present_tags_ids[index_2] + cursors.last.keyvalue.not_nil![0][16..]
           return unless cursor.next && (cursor.keyvalue.not_nil![0][..15] == present_tags_ids[index_2])
-          cursors << cursor.as Lawn::Table::Cursor(Int64)
+          cursors << cursor.as Lawn::Transaction::Cursor(Int64)
         end
         cursor_2 = cursors[index_2]
 
@@ -193,6 +172,28 @@ module Dream
         result << object_id
       end
       result
+    end
+
+    def commit
+      @transaction.commit
+    end
+  end
+
+  class Index
+    include YAML::Serializable
+    include YAML::Serializable::Strict
+
+    getter database : Lawn::Database
+
+    def initialize(@database)
+    end
+
+    def clear
+      @database.clear
+    end
+
+    def transaction
+      Transaction.new @database.transaction
     end
   end
 end
