@@ -16,10 +16,11 @@ module Dream
 
   record Id, value : Bytes
 
-  TAGS_TO_OBJECTS      = 0_u8
-  OBJECTS_TO_TAGS      = 1_u8
+  TAG_AND_OBJECT       = 0_u8
+  OBJECT_AND_TAG       = 1_u8
   IDS_TO_SOURCES       = 2_u8
   TAG_TO_OBJECTS_COUNT = 3_u8
+  OBJECT_TO_TAGS_COUNT = 4_u8
 
   class Transaction
     getter transaction : Lawn::Transaction
@@ -43,51 +44,54 @@ module Dream
       @transaction.set IDS_TO_SOURCES, object_id, object if object.is_a? Bytes
       tags.each do |tag|
         tag_id = tag.is_a?(Bytes) ? Dream.digest(tag) : tag.value
-        @transaction.set TAGS_TO_OBJECTS, tag_id + object_id
-        @transaction.set OBJECTS_TO_TAGS, object_id + tag_id
+        @transaction.set TAG_AND_OBJECT, tag_id + object_id
+        @transaction.set OBJECT_AND_TAG, object_id + tag_id
         @transaction.set IDS_TO_SOURCES, tag_id, tag if tag.is_a? Bytes
         @transaction.set TAG_TO_OBJECTS_COUNT, tag_id, number_to_bytes 1_u32 + ((current_count = @transaction.get(TAG_TO_OBJECTS_COUNT, tag_id)) ? number_from_bytes(current_count) : 0_u32)
       end
+      @transaction.set OBJECT_TO_TAGS_COUNT, object_id, number_to_bytes tags.size.to_u32 + ((current_count = @transaction.get(OBJECT_TO_TAGS_COUNT, object_id)) ? number_from_bytes(current_count) : 0_u32)
       self
     end
 
     def delete(object : Bytes | Id)
       Log.debug { "#{self.class}.delete #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}" }
       object_id = object.is_a?(Bytes) ? Dream.digest(object) : object.value
+      return unless @transaction.get OBJECT_TO_TAGS_COUNT, object_id
       @transaction.delete IDS_TO_SOURCES, object_id if object.is_a? Bytes
-      @transaction.cursor(OBJECTS_TO_TAGS, from: object_id).each_next do |current_object_to_tag, _|
+      @transaction.cursor(OBJECT_AND_TAG, from: object_id).each_next do |current_object_to_tag, _|
         current_object_id = current_object_to_tag[..15]
         break unless current_object_id == object_id
         current_tag_id = current_object_to_tag[16..]
-        @transaction.delete TAGS_TO_OBJECTS, current_tag_id + current_object_id
-        @transaction.delete OBJECTS_TO_TAGS, current_object_to_tag
+        @transaction.delete TAG_AND_OBJECT, current_tag_id + current_object_id
+        @transaction.delete OBJECT_AND_TAG, current_object_to_tag
         @transaction.set TAG_TO_OBJECTS_COUNT, current_tag_id, number_to_bytes number_from_bytes(@transaction.get(TAG_TO_OBJECTS_COUNT, current_tag_id).not_nil!) - 1
       end
+      @transaction.delete OBJECT_TO_TAGS_COUNT, object_id
       self
     end
 
     def delete(object : Bytes | Id, tags : Array(Bytes | Id))
       Log.debug { "#{self.class}.delete object: #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}, tags: #{tags.map { |tag| tag.is_a?(Bytes) ? tag.hexstring : tag.value.hexstring }}" }
       object_id = object.is_a?(Bytes) ? Dream.digest(object) : object.value
+      return unless @transaction.get OBJECT_TO_TAGS_COUNT, object_id
+      tags_removed_from_object = 0
       tags.each do |tag|
         tag_id = tag.is_a?(Bytes) ? Dream.digest(tag) : tag.value
-        if @transaction.get TAGS_TO_OBJECTS, tag_id + object_id
-          @transaction.delete TAGS_TO_OBJECTS, tag_id + object_id
-          @transaction.delete OBJECTS_TO_TAGS, object_id + tag_id
-          new_tag_count = number_from_bytes(@transaction.get(TAG_TO_OBJECTS_COUNT, tag_id).not_nil!) - 1
-          if new_tag_count > 0
-            @transaction.set TAG_TO_OBJECTS_COUNT, tag_id, number_to_bytes new_tag_count
-          else
-            @transaction.delete TAG_TO_OBJECTS_COUNT, tag_id
-            @transaction.delete IDS_TO_SOURCES, tag_id
-          end
+        next unless @transaction.get TAG_AND_OBJECT, tag_id + object_id
+        @transaction.delete TAG_AND_OBJECT, tag_id + object_id
+        @transaction.delete OBJECT_AND_TAG, object_id + tag_id
+        new_tag_count = number_from_bytes(@transaction.get(TAG_TO_OBJECTS_COUNT, tag_id).not_nil!) - 1
+        if new_tag_count > 0
+          @transaction.set TAG_TO_OBJECTS_COUNT, tag_id, number_to_bytes new_tag_count
+        else
+          @transaction.delete TAG_TO_OBJECTS_COUNT, tag_id
+          @transaction.delete IDS_TO_SOURCES, tag_id
         end
+        tags_removed_from_object += 1
       end
-      if @transaction.get IDS_TO_SOURCES, object_id
-        @transaction.cursor(OBJECTS_TO_TAGS, from: object_id).each_next do |current_object_to_tag, _|
-          current_object_id = current_object_to_tag[..15]
-          @transaction.delete IDS_TO_SOURCES, object_id unless current_object_id == object_id
-        end
+      if tags_removed_from_object == number_from_bytes @transaction.get(OBJECT_TO_TAGS_COUNT, object_id).not_nil!
+        @transaction.delete OBJECT_TO_TAGS_COUNT, object_id
+        @transaction.delete IDS_TO_SOURCES, object_id
       end
       self
     end
@@ -101,13 +105,13 @@ module Dream
       Log.debug { "#{self.class}.has_tag? object: #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}, tag: #{tag.is_a?(Bytes) ? tag.hexstring : tag.value.hexstring}" }
       object_id = object.is_a?(Bytes) ? Dream.digest(object) : object.value
       tag_id = tag.is_a?(Bytes) ? Dream.digest(tag) : tag.value
-      @transaction.get(OBJECTS_TO_TAGS, object_id + tag_id) != nil
+      @transaction.get(OBJECT_AND_TAG, object_id + tag_id) != nil
     end
 
     def get(object : Bytes | Id, &)
       Log.debug { "#{self.class}.get #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}" }
       object_id = object.is_a?(Bytes) ? Dream.digest(object) : object.value
-      @transaction.cursor(OBJECTS_TO_TAGS, from: object_id).each_next do |current_object_to_tag, _|
+      @transaction.cursor(OBJECT_AND_TAG, from: object_id).each_next do |current_object_to_tag, _|
         current_object_id = current_object_to_tag[..15]
         break unless current_object_id == object_id
         current_tag_id = current_object_to_tag[16..]
@@ -133,22 +137,22 @@ module Dream
 
       if present_tags_ids.size == 1
         tag_id = present_tags_ids.first
-        @transaction.cursor(TAGS_TO_OBJECTS, from: start_after_object ? tag_id + start_after_object.value : tag_id, including_from: start_after_object.nil?).each_next do |current_tag_to_object, _|
+        @transaction.cursor(TAG_AND_OBJECT, from: start_after_object ? tag_id + start_after_object.value : tag_id, including_from: start_after_object.nil?).each_next do |current_tag_to_object, _|
           current_tag_id = current_tag_to_object[..15]
           break unless current_tag_id == tag_id
           current_object_id = current_tag_to_object[16..]
-          yield Id.new(current_object_id) if absent_tags_ids.all? { |tag_id| @transaction.get(TAGS_TO_OBJECTS, tag_id + current_object_id) == nil }
+          yield Id.new(current_object_id) if absent_tags_ids.all? { |tag_id| @transaction.get(TAG_AND_OBJECT, tag_id + current_object_id) == nil }
         end
         return
       end
 
-      cursors = [] of Lawn::Transaction::Cursor(Int64) # TAGS_TO_OBJECTS
+      cursors = [] of Lawn::Transaction::Cursor(Int64) # TAG_AND_OBJECT
 
       index_1 = 0
       index_2 = 1
       loop do
         if cursors.size == present_tags_ids.size && cursors.all? { |cursor| cursor.keyvalue.not_nil![0][16..] == cursors.first.keyvalue.not_nil![0][16..] }
-          yield Id.new(cursors.first.keyvalue.not_nil![0][16..]) if absent_tags_ids.all? { |tag_id| @transaction.get(TAGS_TO_OBJECTS, tag_id + cursors.first.keyvalue.not_nil![0][16..]) == nil }
+          yield Id.new(cursors.first.keyvalue.not_nil![0][16..]) if absent_tags_ids.all? { |tag_id| @transaction.get(TAG_AND_OBJECT, tag_id + cursors.first.keyvalue.not_nil![0][16..]) == nil }
           return unless cursors.first.next && (cursors.first.keyvalue.not_nil![0][..15] == present_tags_ids.first)
           index_1 = 0
           index_2 = 1
@@ -156,9 +160,9 @@ module Dream
 
         if (cursors.size < present_tags_ids.size) && (cursors.size <= index_1)
           if index_1 == 0
-            cursor = @transaction.cursor TAGS_TO_OBJECTS, from: start_after_object ? present_tags_ids[index_1] + start_after_object.value : present_tags_ids[index_1], including_from: start_after_object.nil?
+            cursor = @transaction.cursor TAG_AND_OBJECT, from: start_after_object ? present_tags_ids[index_1] + start_after_object.value : present_tags_ids[index_1], including_from: start_after_object.nil?
           else
-            cursor = @transaction.cursor TAGS_TO_OBJECTS, from: cursors.last.keyvalue.not_nil![0][16..]
+            cursor = @transaction.cursor TAG_AND_OBJECT, from: cursors.last.keyvalue.not_nil![0][16..]
           end
           cursor.next
           return unless cursor.keyvalue && (cursor.keyvalue.not_nil![0][..15] == present_tags_ids[index_1])
@@ -167,7 +171,7 @@ module Dream
         cursor_1 = cursors[index_1]
 
         if (cursors.size < present_tags_ids.size) && (cursors.size <= index_2)
-          cursor = @transaction.cursor TAGS_TO_OBJECTS, from: present_tags_ids[index_2] + cursors.last.keyvalue.not_nil![0][16..]
+          cursor = @transaction.cursor TAG_AND_OBJECT, from: present_tags_ids[index_2] + cursors.last.keyvalue.not_nil![0][16..]
           return unless cursor.next && (cursor.keyvalue.not_nil![0][..15] == present_tags_ids[index_2])
           cursors << cursor.as Lawn::Transaction::Cursor(Int64)
         end
