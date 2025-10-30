@@ -96,14 +96,14 @@ module Dream
 
     def has_tag?(object : Bytes | Id, tag : Bytes | Id)
       Log.debug { "#{self.class}.has_tag? object: #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}, tag: #{tag.is_a?(Bytes) ? tag.hexstring : tag.value.hexstring}" }
-      object_id = object.is_a?(Bytes) ? Dream.digest(object) : object
-      tag_id = tag.is_a?(Bytes) ? Dream.digest(tag) : tag
+      object_id = object.is_a?(Bytes) ? Dream.digest(object) : object.value
+      tag_id = tag.is_a?(Bytes) ? Dream.digest(tag) : tag.value
       @transaction.get(OBJECTS_TO_TAGS, object_id + tag_id) != nil
     end
 
     def get(object : Bytes | Id, &)
       Log.debug { "#{self.class}.get #{object.is_a?(Bytes) ? object.hexstring : object.value.hexstring}" }
-      object_id = object.is_a?(Bytes) ? Dream.digest(object) : object
+      object_id = object.is_a?(Bytes) ? Dream.digest(object) : object.value
       @transaction.cursor(OBJECTS_TO_TAGS, from: object_id).each_next do |current_object_to_tag, _|
         current_object_id = current_object_to_tag[..15]
         break unless current_object_id == object_id
