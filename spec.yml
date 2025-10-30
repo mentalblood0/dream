@@ -24,7 +24,7 @@ index:
       index:
         path: /tmp/dream/ids_to_sources/index.idx
         cache_size: 128MB
-    # TAGS_TO_OBJECTS_COUNTS
+    # TAG_TO_OBJECTS_COUNT
     - key_size: 16
       value_size: 4
       data_storage_path: /tmp/dream/tags_counts/data.dat
