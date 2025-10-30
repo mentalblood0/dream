@@ -74,18 +74,21 @@ module Dream
         if @transaction.get TAGS_TO_OBJECTS, tag_id + object_id
           @transaction.delete TAGS_TO_OBJECTS, tag_id + object_id
           @transaction.delete OBJECTS_TO_TAGS, object_id + tag_id
-          @transaction.set TAG_TO_OBJECTS_COUNT, tag_id, number_to_bytes number_from_bytes(@transaction.get(TAG_TO_OBJECTS_COUNT, tag_id).not_nil!) - 1
+          new_tag_count = number_from_bytes(@transaction.get(TAG_TO_OBJECTS_COUNT, tag_id).not_nil!) - 1
+          if new_tag_count > 0
+            @transaction.set TAG_TO_OBJECTS_COUNT, tag_id, number_to_bytes new_tag_count
+          else
+            @transaction.delete TAG_TO_OBJECTS_COUNT, tag_id
+            @transaction.delete IDS_TO_SOURCES, tag_id
+          end
         end
       end
-      @transaction.cursor(OBJECTS_TO_TAGS, from: object_id).each_next do |current_object_to_tag, _|
-        current_object_id = current_object_to_tag[..15]
-        if current_object_id == object_id
-          return self
-        else
-          break
+      if @transaction.get IDS_TO_SOURCES, object_id
+        @transaction.cursor(OBJECTS_TO_TAGS, from: object_id).each_next do |current_object_to_tag, _|
+          current_object_id = current_object_to_tag[..15]
+          @transaction.delete IDS_TO_SOURCES, object_id unless current_object_id == object_id
         end
       end
-      @transaction.delete IDS_TO_SOURCES, object_id
       self
     end
 
