@@ -89,9 +89,12 @@ module Dream
         end
         tags_removed_from_object += 1
       end
-      if tags_removed_from_object == number_from_bytes @transaction.get(OBJECT_TO_TAGS_COUNT, object_id).not_nil!
+      object_tags_count_before_delete = number_from_bytes @transaction.get(OBJECT_TO_TAGS_COUNT, object_id).not_nil!
+      if tags_removed_from_object == object_tags_count_before_delete
         @transaction.delete OBJECT_TO_TAGS_COUNT, object_id
         @transaction.delete IDS_TO_SOURCES, object_id if object.is_a? Bytes
+      else
+        @transaction.set OBJECT_TO_TAGS_COUNT, object_id, number_to_bytes object_tags_count_before_delete - tags_removed_from_object
       end
       self
     end
