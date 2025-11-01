@@ -85,13 +85,13 @@ module Dream
           @transaction.set TAG_TO_OBJECTS_COUNT, tag_id, number_to_bytes new_tag_count
         else
           @transaction.delete TAG_TO_OBJECTS_COUNT, tag_id
-          @transaction.delete IDS_TO_SOURCES, tag_id
+          @transaction.delete IDS_TO_SOURCES, tag_id if tag.is_a? Bytes
         end
         tags_removed_from_object += 1
       end
       if tags_removed_from_object == number_from_bytes @transaction.get(OBJECT_TO_TAGS_COUNT, object_id).not_nil!
         @transaction.delete OBJECT_TO_TAGS_COUNT, object_id
-        @transaction.delete IDS_TO_SOURCES, object_id
+        @transaction.delete IDS_TO_SOURCES, object_id if object.is_a? Bytes
       end
       self
     end
