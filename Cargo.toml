@@ -1,0 +1,16 @@
+[package]
+name = "dream"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lawn = { git = "https://github.com/mentalblood0/lawn" }
+xxhash-rust = {version = "0.8.15", features = ["xxh3"]}
+serde = { optional = true, version = "1.0", features = ["derive"] }
+serde-saphyr = { optional = true, git = "https://github.com/bourumir-wyngs/serde-saphyr" }
+typetag = { optional = true, version = "0.2" }
+
+[features]
+serde = ["dep:serde", "dep:serde-saphyr", "dep:typetag"]
+
+
