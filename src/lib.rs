@@ -1,9 +1,10 @@
+use fallible_iterator::FallibleIterator;
 use xxhash_rust::xxh3::xxh3_128;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, bincode::Encode, bincode::Decode)]
+#[derive(Clone, bincode::Encode, bincode::Decode, Default, PartialEq)]
 pub struct Id {
     pub value: [u8; 16],
 }
@@ -48,7 +49,7 @@ pub struct WriteTransaction<'a> {
 }
 
 impl<'a> WriteTransaction<'a> {
-    pub fn insert(&mut self, object: Object, tags: &Vec<Object>) -> Result<&mut Self, String> {
+    pub fn insert(&mut self, object: Object, tags: &Vec<Object>) -> Result<&Self, String> {
         let object_id = object.get_id();
         if let Object::Raw(ref raw) = object {
             self.database_write_transaction
@@ -89,6 +90,49 @@ impl<'a> WriteTransaction<'a> {
                 .unwrap_or(0 as u32)
                 + 1),
         )?;
+        Ok(self)
+    }
+
+    pub fn remove(&mut self, object: Object) -> Result<&Self, String> {
+        let object_id = object.get_id();
+        if self
+            .database_write_transaction
+            .get::<Id, Id>(OBJECT_TO_TAGS_COUNT, &object_id)?
+            .is_none()
+        {
+            return Ok(self);
+        }
+        if let Object::Raw(_) = object {
+            self.database_write_transaction
+                .remove(IDS_TO_SOURCES, &object_id)?;
+        }
+        let object_and_tag_iterator = self
+            .database_write_transaction
+            .iter::<(Id, Id), [u8; 0]>(OBJECT_AND_TAG, Some(&(object_id.clone(), Id::default())))?
+            .collect::<Vec<_>>()?;
+        for ((current_object_id, current_tag_id), _) in object_and_tag_iterator {
+            if current_object_id != current_tag_id {
+                break;
+            }
+            self.database_write_transaction.remove(
+                TAG_AND_OBJECT,
+                &(current_tag_id.clone(), current_object_id.clone()),
+            )?;
+            self.database_write_transaction
+                .remove(OBJECT_AND_TAG, &(current_object_id, current_tag_id.clone()))?;
+            self.database_write_transaction.set(
+                TAG_TO_OBJECTS_COUNT,
+                &current_tag_id,
+                &(self
+                    .database_write_transaction
+                    .get::<Id, u32>(TAG_TO_OBJECTS_COUNT, &current_tag_id)?
+                    .unwrap_or(0 as u32)
+                    - 1),
+            )?;
+        }
+        self.database_write_transaction
+            .remove(OBJECT_TO_TAGS_COUNT, &object_id)?;
+
         Ok(self)
     }
 }
