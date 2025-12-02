@@ -63,6 +63,7 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 name = "dream"
 version = "0.1.0"
 dependencies = [
+ "bincode",
  "lawn",
  "serde",
  "serde-saphyr",
@@ -159,7 +160,7 @@ checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
 [[package]]
 name = "lawn"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/lawn#a0b0e30b304a638a569706b4c370f6c08380e63d"
+source = "git+https://github.com/mentalblood0/lawn#ac42fa99bd33cf5881abbacbcd1a7c69b6e7ff1f"
 dependencies = [
  "bincode",
  "fallible-iterator",

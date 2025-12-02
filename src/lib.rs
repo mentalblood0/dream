@@ -3,9 +3,9 @@ use xxhash_rust::xxh3::xxh3_128;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone)]
+#[derive(Clone, bincode::Encode, bincode::Decode)]
 pub struct Id {
-    pub value: Vec<u8>,
+    pub value: [u8; 16],
 }
 
 pub enum Object {
@@ -17,7 +17,7 @@ impl Object {
     fn get_id(&self) -> Id {
         match self {
             Object::Raw(raw) => Id {
-                value: xxh3_128(raw).to_le_bytes().to_vec(),
+                value: xxh3_128(raw).to_le_bytes(),
             },
             Object::Identified(id) => id.clone(),
         }
@@ -48,35 +48,47 @@ pub struct WriteTransaction<'a> {
 }
 
 impl<'a> WriteTransaction<'a> {
-    pub fn insert(&mut self, object: Object, tags: &Vec<Object>) -> Result<&Self, String> {
+    pub fn insert(&mut self, object: Object, tags: &Vec<Object>) -> Result<&mut Self, String> {
         let object_id = object.get_id();
         if let Object::Raw(ref raw) = object {
-            self.database_write_transaction.set(
-                IDS_TO_SOURCES,
-                object_id.value.clone(),
-                raw.clone(),
-            )?;
+            self.database_write_transaction
+                .set(IDS_TO_SOURCES, &object_id, &raw)?;
         }
         for tag in tags {
             let tag_id = tag.get_id();
             self.database_write_transaction.set(
                 TAG_AND_OBJECT,
-                [tag_id.value.clone(), object_id.value.clone()].concat(),
-                vec![],
+                &(tag_id.clone(), object_id.clone()),
+                &([] as [u8; 0]),
             )?;
             self.database_write_transaction.set(
                 OBJECT_AND_TAG,
-                [object_id.value.clone(), tag_id.value.clone()].concat(),
-                vec![],
+                &(object_id.clone(), tag_id.clone()),
+                &([] as [u8; 0]),
             )?;
             if let Object::Raw(ref raw) = object {
-                self.database_write_transaction.set(
-                    IDS_TO_SOURCES,
-                    tag_id.value.clone(),
-                    raw.clone(),
-                )?;
+                self.database_write_transaction
+                    .set(IDS_TO_SOURCES, &tag_id, &raw)?;
             }
+            self.database_write_transaction.set(
+                TAG_TO_OBJECTS_COUNT,
+                &tag_id,
+                &(self
+                    .database_write_transaction
+                    .get::<Id, u32>(TAG_TO_OBJECTS_COUNT, &tag_id)?
+                    .unwrap_or(0 as u32)
+                    + 1),
+            )?;
         }
+        self.database_write_transaction.set(
+            OBJECT_TO_TAGS_COUNT,
+            &object_id,
+            &(self
+                .database_write_transaction
+                .get::<Id, u32>(OBJECT_TO_TAGS_COUNT, &object_id)?
+                .unwrap_or(0 as u32)
+                + 1),
+        )?;
         Ok(self)
     }
 }
