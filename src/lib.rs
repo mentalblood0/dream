@@ -225,6 +225,221 @@ impl<'a> WriteTransaction<'a> {
             .map(|((_, current_tag_id), _)| Ok(current_tag_id))
             .collect::<Vec<_>>()
     }
+
+    pub fn search(
+        &self,
+        present_tags: &Vec<Object>,
+        absent_tags: &Vec<Object>,
+        start_after_object: Option<Id>,
+    ) -> Result<Box<dyn FallibleIterator<Item = Id, Error = String> + '_>, String> {
+        Ok(Box::new(SearchIterator {
+            database_write_transaction: &self.database_write_transaction,
+            absent_tags_ids: {
+                let mut absent_tags_ids_and_objects_count: Vec<(Id, u32)> = Vec::new();
+                for tag in absent_tags {
+                    let tag_id = tag.get_id();
+                    if let Some(tag_objects_count) = self
+                        .database_write_transaction
+                        .get::<Id, u32>(TAG_TO_OBJECTS_COUNT, &tag_id)?
+                    {
+                        absent_tags_ids_and_objects_count.push((tag_id, tag_objects_count));
+                    }
+                }
+                absent_tags_ids_and_objects_count
+                    .sort_by_key(|(_, tag_objects_count)| *tag_objects_count);
+                absent_tags_ids_and_objects_count.reverse();
+                absent_tags_ids_and_objects_count
+                    .into_iter()
+                    .map(|(tag, _)| tag)
+                    .collect()
+            },
+            present_tags_ids: {
+                let mut present_tags_ids_and_objects_count: Vec<(Id, u32)> = Vec::new();
+                for tag in present_tags {
+                    let tag_id = tag.get_id();
+                    present_tags_ids_and_objects_count.push((
+                        tag_id.clone(),
+                        self.database_write_transaction
+                            .get::<Id, u32>(TAG_TO_OBJECTS_COUNT, &tag_id)?
+                            .unwrap_or(0 as u32),
+                    ));
+                }
+                present_tags_ids_and_objects_count
+                    .sort_by_key(|(_, tag_objects_count)| *tag_objects_count);
+                present_tags_ids_and_objects_count
+                    .into_iter()
+                    .map(|(tag, _)| tag)
+                    .collect()
+            },
+            start_after_object,
+            cursors: Vec::new(),
+            index_1: 0 as usize,
+            index_2: 1 as usize,
+            end: false,
+        }))
+    }
+}
+
+struct Cursor<'a> {
+    iterator: Box<dyn FallibleIterator<Item = ((Id, Id), [u8; 0]), Error = String> + 'a>,
+    current_value: Option<(Id, Id)>,
+}
+
+impl<'a> Cursor<'a> {
+    fn new(
+        mut iterator: Box<dyn FallibleIterator<Item = ((Id, Id), [u8; 0]), Error = String> + 'a>,
+    ) -> Result<Self, String> {
+        let current_value = iterator
+            .next()?
+            .and_then(|(current_value, _)| Some(current_value));
+        Ok(Self {
+            iterator,
+            current_value,
+        })
+    }
+
+    fn next(&mut self) -> Result<(), String> {
+        self.current_value = self
+            .iterator
+            .next()?
+            .and_then(|(current_value, _)| Some(current_value));
+        Ok(())
+    }
+}
+
+pub struct SearchIterator<'a> {
+    database_write_transaction: &'a lawn::database::WriteTransaction<'a>,
+    present_tags_ids: Vec<Id>,
+    absent_tags_ids: Vec<Id>,
+    start_after_object: Option<Id>,
+    cursors: Vec<Cursor<'a>>,
+    index_1: usize,
+    index_2: usize,
+    end: bool,
+}
+
+impl<'a> FallibleIterator for SearchIterator<'a> {
+    type Item = Id;
+    type Error = String;
+
+    fn next(&mut self) -> Result<Option<Self::Item>, Self::Error> {
+        if self.end {
+            return Ok(None);
+        }
+        loop {
+            if self.cursors.len() == self.present_tags_ids.len() {
+                let first_cursor_object = self.cursors[0].current_value.clone().unwrap().1;
+                if self.cursors.iter().all(|cursor| {
+                    cursor
+                        .current_value
+                        .clone()
+                        .is_some_and(|current_value| current_value.1 == first_cursor_object)
+                }) {
+                    let result = if fallible_iterator::convert(
+                        self.absent_tags_ids
+                            .iter()
+                            .map(|id| Result::<Id, String>::Ok(id.clone())),
+                    )
+                    .all(|tag_id| {
+                        Ok(self
+                            .database_write_transaction
+                            .get::<(Id, Id), [u8; 0]>(
+                                TAG_AND_OBJECT,
+                                &(tag_id.clone(), first_cursor_object.clone()),
+                            )?
+                            .is_none())
+                    })? {
+                        Some(first_cursor_object)
+                    } else {
+                        None
+                    };
+                    self.cursors[0].next()?;
+                    if !self.cursors[0]
+                        .current_value
+                        .as_ref()
+                        .is_some_and(|first_cursor_value| {
+                            first_cursor_value.0 == self.present_tags_ids[0]
+                        })
+                    {
+                        self.end = true
+                    }
+                    if let Some(result) = result {
+                        return Ok(Some(result));
+                    }
+                }
+            }
+
+            if self.cursors.len() < self.present_tags_ids.len()
+                && self.cursors.len() <= self.index_1
+            {
+                let cursor =
+                    Cursor::new(self.database_write_transaction.iter::<(Id, Id), [u8; 0]>(
+                        TAG_AND_OBJECT,
+                        Some(&if self.index_1 == 0 {
+                            (
+                                self.present_tags_ids[self.index_1].clone(),
+                                self.start_after_object.clone().unwrap_or_default(),
+                            )
+                        } else {
+                            (
+                                self.cursors
+                                    .last()
+                                    .unwrap()
+                                    .current_value
+                                    .clone()
+                                    .unwrap()
+                                    .1,
+                                Id::default(),
+                            )
+                        }),
+                    )?)?;
+                if !cursor
+                    .current_value
+                    .as_ref()
+                    .is_some_and(|first_cursor_value| {
+                        first_cursor_value.0 == self.present_tags_ids[self.index_1]
+                    })
+                {
+                    self.end = true;
+                    return Ok(None);
+                }
+                self.cursors.push(cursor);
+            }
+            let cursor_1 = &self.cursors[self.index_1];
+
+            if self.cursors.len() < self.present_tags_ids.len()
+                && self.cursors.len() <= self.index_2
+            {
+                let cursor = Cursor::new(
+                    self.database_write_transaction.iter::<(Id, Id), [u8; 0]>(
+                        TAG_AND_OBJECT,
+                        Some(&(
+                            self.present_tags_ids[self.index_2].clone(),
+                            self.cursors
+                                .last()
+                                .unwrap()
+                                .current_value
+                                .clone()
+                                .unwrap()
+                                .1,
+                        )),
+                    )?,
+                )?;
+                if !cursor
+                    .current_value
+                    .as_ref()
+                    .is_some_and(|first_cursor_value| {
+                        first_cursor_value.0 == self.present_tags_ids[self.index_2]
+                    })
+                {
+                    self.end = true;
+                    return Ok(None);
+                }
+                self.cursors.push(cursor);
+            }
+            let cursor_2 = &self.cursors[self.index_2];
+        }
+    }
 }
 
 impl Index {
