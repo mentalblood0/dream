@@ -372,27 +372,27 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
             if self.cursors.len() < self.present_tags_ids.len()
                 && self.cursors.len() <= self.index_1
             {
-                let cursor =
+                let mut cursor =
                     Cursor::new(self.database_write_transaction.iter::<(Id, Id), [u8; 0]>(
                         TAG_AND_OBJECT,
-                        Some(&if self.index_1 == 0 {
-                            (
-                                self.present_tags_ids[self.index_1].clone(),
-                                self.start_after_object.clone().unwrap_or_default(),
-                            )
-                        } else {
-                            (
+                        Some(&(
+                            self.present_tags_ids[self.index_1].clone(),
+                            if self.index_1 == 0 {
+                                self.start_after_object.clone().unwrap_or_default()
+                            } else {
                                 self.cursors
                                     .last()
                                     .unwrap()
                                     .current_value
                                     .clone()
                                     .unwrap()
-                                    .1,
-                                Id::default(),
-                            )
-                        }),
+                                    .1
+                            },
+                        )),
                     )?)?;
+                if self.index_1 == 0 && self.start_after_object.is_some() {
+                    cursor.next()?;
+                }
                 if !cursor
                     .current_value
                     .as_ref()
@@ -405,7 +405,6 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
                 }
                 self.cursors.push(cursor);
             }
-            let cursor_1 = &self.cursors[self.index_1];
 
             if self.cursors.len() < self.present_tags_ids.len()
                 && self.cursors.len() <= self.index_2
@@ -437,7 +436,6 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
                 }
                 self.cursors.push(cursor);
             }
-            let cursor_2 = &self.cursors[self.index_2];
         }
     }
 }
