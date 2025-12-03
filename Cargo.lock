@@ -161,7 +161,7 @@ checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
 [[package]]
 name = "lawn"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/lawn#7a30f27a5b942fa5c1e3c1c8c26caf5b528640fe"
+source = "git+https://github.com/mentalblood0/lawn#84427d9c09a53a909ae72d3d327a05da84c1f09b"
 dependencies = [
  "bincode",
  "fallible-iterator",
