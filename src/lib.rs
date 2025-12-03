@@ -50,9 +50,9 @@ pub struct WriteTransaction<'a> {
 }
 
 impl<'a> WriteTransaction<'a> {
-    pub fn insert(&mut self, object: Object, tags: &Vec<Object>) -> Result<&Self, String> {
+    pub fn insert(&mut self, object: &Object, tags: &Vec<Object>) -> Result<&Self, String> {
         let object_id = object.get_id();
-        if let Object::Raw(ref raw) = object {
+        if let Object::Raw(raw) = object {
             self.database_write_transaction
                 .set(IDS_TO_SOURCES, &object_id, &raw)?;
         }
@@ -68,7 +68,7 @@ impl<'a> WriteTransaction<'a> {
                 &(object_id.clone(), tag_id.clone()),
                 &([] as [u8; 0]),
             )?;
-            if let Object::Raw(ref raw) = object {
+            if let Object::Raw(raw) = object {
                 self.database_write_transaction
                     .set(IDS_TO_SOURCES, &tag_id, &raw)?;
             }
@@ -94,7 +94,7 @@ impl<'a> WriteTransaction<'a> {
         Ok(self)
     }
 
-    pub fn remove_object(&mut self, object: Object) -> Result<&Self, String> {
+    pub fn remove_object(&mut self, object: &Object) -> Result<&Self, String> {
         let object_id = object.get_id();
         if self
             .database_write_transaction
@@ -110,11 +110,9 @@ impl<'a> WriteTransaction<'a> {
         let object_and_tag_iterator = self
             .database_write_transaction
             .iter::<(Id, Id), [u8; 0]>(OBJECT_AND_TAG, Some(&(object_id.clone(), Id::default())))?
+            .take_while(|((current_object_id, _), _)| Ok(current_object_id == &object_id))
             .collect::<Vec<_>>()?;
         for ((current_object_id, current_tag_id), _) in object_and_tag_iterator {
-            if current_object_id != current_tag_id {
-                break;
-            }
             self.database_write_transaction.remove(
                 TAG_AND_OBJECT,
                 &(current_tag_id.clone(), current_object_id.clone()),
@@ -139,7 +137,7 @@ impl<'a> WriteTransaction<'a> {
 
     pub fn remove_tags_from_object(
         &mut self,
-        object: Object,
+        object: &Object,
         tags: &Vec<Object>,
     ) -> Result<&Self, String> {
         let object_id = object.get_id();
@@ -205,6 +203,27 @@ impl<'a> WriteTransaction<'a> {
         }
 
         Ok(self)
+    }
+
+    pub fn get_source(&self, id: &Id) -> Result<Option<Vec<u8>>, String> {
+        self.database_write_transaction
+            .get::<Id, Vec<u8>>(IDS_TO_SOURCES, id)
+    }
+
+    pub fn has_tag(&self, object: &Object, tag: &Object) -> Result<bool, String> {
+        Ok(self
+            .database_write_transaction
+            .get::<(Id, Id), [u8; 0]>(OBJECT_AND_TAG, &(object.get_id(), tag.get_id()))?
+            .is_some())
+    }
+
+    pub fn get_tags(&self, object: Object) -> Result<Vec<Id>, String> {
+        let object_id = object.get_id();
+        self.database_write_transaction
+            .iter::<(Id, Id), [u8; 0]>(OBJECT_AND_TAG, Some(&(object_id.clone(), Id::default())))?
+            .take_while(|((current_object_id, _), _)| Ok(current_object_id == &object_id))
+            .map(|((_, current_tag_id), _)| Ok(current_tag_id))
+            .collect::<Vec<_>>()
     }
 }
 
