@@ -4,11 +4,12 @@ use xxhash_rust::xxh3::xxh3_128;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, bincode::Encode, bincode::Decode, Default, PartialEq)]
+#[derive(Clone, Default, PartialEq, Debug, bincode::Encode, bincode::Decode)]
 pub struct Id {
     pub value: [u8; 16],
 }
 
+#[derive(Debug)]
 pub enum Object {
     Raw(Vec<u8>),
     Identified(Id),
@@ -93,7 +94,7 @@ impl<'a> WriteTransaction<'a> {
         Ok(self)
     }
 
-    pub fn remove(&mut self, object: Object) -> Result<&Self, String> {
+    pub fn remove_object(&mut self, object: Object) -> Result<&Self, String> {
         let object_id = object.get_id();
         if self
             .database_write_transaction
@@ -135,6 +136,76 @@ impl<'a> WriteTransaction<'a> {
 
         Ok(self)
     }
+
+    pub fn remove_tags_from_object(
+        &mut self,
+        object: Object,
+        tags: &Vec<Object>,
+    ) -> Result<&Self, String> {
+        let object_id = object.get_id();
+        if self
+            .database_write_transaction
+            .get::<Id, Id>(OBJECT_TO_TAGS_COUNT, &object_id)?
+            .is_none()
+        {
+            return Ok(self);
+        }
+        let mut tags_removed_from_object: u32 = 0;
+        for tag in tags {
+            let tag_id = tag.get_id();
+            if self
+                .database_write_transaction
+                .get::<(Id, Id), [u8; 0]>(TAG_AND_OBJECT, &(tag_id.clone(), object_id.clone()))?
+                .is_none()
+            {
+                continue;
+            }
+            self.database_write_transaction
+                .remove(TAG_AND_OBJECT, &(tag_id.clone(), object_id.clone()))?;
+            self.database_write_transaction
+                .remove(OBJECT_AND_TAG, &(object_id.clone(), tag_id.clone()))?;
+            let new_tag_count = self
+                .database_write_transaction
+                .get::<Id, u32>(TAG_TO_OBJECTS_COUNT, &tag_id)?
+                .ok_or(format!("No objects count record for tag {tag:?}"))?
+                - 1;
+            if new_tag_count > 0 {
+                self.database_write_transaction.set(
+                    TAG_TO_OBJECTS_COUNT,
+                    &tag_id,
+                    &new_tag_count,
+                )?;
+            } else {
+                self.database_write_transaction
+                    .remove(TAG_TO_OBJECTS_COUNT, &tag_id)?;
+                if let Object::Raw(_) = tag {
+                    self.database_write_transaction
+                        .remove(IDS_TO_SOURCES, &tag_id)?;
+                }
+            }
+            tags_removed_from_object += 1;
+        }
+        let object_tags_count_before_delete = self
+            .database_write_transaction
+            .get::<Id, u32>(OBJECT_TO_TAGS_COUNT, &object_id)?
+            .ok_or("No tags count record for object {object:?}")?;
+        if tags_removed_from_object == object_tags_count_before_delete {
+            self.database_write_transaction
+                .remove(OBJECT_TO_TAGS_COUNT, &object_id)?;
+            if let Object::Raw(_) = object {
+                self.database_write_transaction
+                    .remove(IDS_TO_SOURCES, &object_id)?;
+            }
+        } else {
+            self.database_write_transaction.set(
+                OBJECT_TO_TAGS_COUNT,
+                &object_id,
+                &(object_tags_count_before_delete - tags_removed_from_object),
+            )?;
+        }
+
+        Ok(self)
+    }
 }
 
 impl Index {
@@ -157,7 +228,7 @@ impl Index {
         Ok(self)
     }
 
-    pub fn lock_all_and_read<F>(&self, f: F) -> Result<&Self, String>
+    pub fn lock_all_writes_and_read<F>(&self, f: F) -> Result<&Self, String>
     where
         F: Fn(ReadTransaction) -> (),
     {
