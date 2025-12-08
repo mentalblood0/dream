@@ -320,11 +320,9 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
                             first_cursor_value.0 == self.present_tags_ids[0]
                         })
                     {
-                        self.end = true
+                        self.end = true;
                     }
-                    if let Some(result) = result {
-                        return Ok(Some(result));
-                    }
+                    return Ok(result);
                 }
             }
 
@@ -425,7 +423,7 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
                     }
                 }
                 self.index_1 = 0;
-                self.index_2 = 0;
+                self.index_2 = 1;
             }
         }
     }
@@ -659,6 +657,12 @@ mod tests {
                         .search(&vec![a.clone(), b.clone(), c.clone()], &vec![], None)?
                         .collect::<Vec<_>>()?,
                     [o3.get_id()]
+                );
+                assert_eq!(
+                    transaction
+                        .search(&vec![a.clone(), b.clone()], &vec![], None)?
+                        .collect::<Vec<_>>()?,
+                    [o3.get_id(), o2.get_id()]
                 );
                 Ok(())
             })
