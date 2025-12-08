@@ -4,7 +4,9 @@ use xxhash_rust::xxh3::xxh3_128;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Default, PartialEq, PartialOrd, Debug, bincode::Encode, bincode::Decode)]
+#[derive(
+    Clone, Default, PartialEq, PartialOrd, Debug, bincode::Encode, bincode::Decode, Eq, Ord,
+)]
 pub struct Id {
     pub value: [u8; 16],
 }
@@ -26,27 +28,31 @@ impl Object {
     }
 }
 
-const TAG_AND_OBJECT: usize = 0;
-const OBJECT_AND_TAG: usize = 0;
-const IDS_TO_SOURCES: usize = 0;
-const TAG_TO_OBJECTS_COUNT: usize = 0;
-const OBJECT_TO_TAGS_COUNT: usize = 0;
+lawn::database::define_database!(dream_database {
+    tag_and_object<(Id, Id), ()>,
+    object_and_tag<(Id, Id), ()>,
+    id_to_source<Id, Vec<u8>>,
+    tag_to_objects_count<Id, u32>,
+    object_to_tags_count<Id, u32>
+} use {
+    use super::Id;
+});
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct IndexConfig {
-    pub database: lawn::database::DatabaseConfig,
+    pub database: dream_database::DatabaseConfig,
 }
 
 pub struct Index {
-    database: lawn::database::Database,
+    database: dream_database::Database,
 }
 
 pub struct ReadTransaction<'a> {
-    database_read_transaction: lawn::database::ReadTransaction<'a>,
+    database_read_transaction: dream_database::ReadTransaction<'a>,
 }
 
 pub struct WriteTransaction<'a> {
-    database_write_transaction: lawn::database::WriteTransaction<'a>,
+    database_write_transaction: dream_database::WriteTransaction<'a>,
 }
 
 impl<'a> WriteTransaction<'a> {
@@ -54,43 +60,41 @@ impl<'a> WriteTransaction<'a> {
         let object_id = object.get_id();
         if let Object::Raw(raw) = object {
             self.database_write_transaction
-                .set(IDS_TO_SOURCES, &object_id, &raw)?;
+                .id_to_source
+                .insert(object_id.clone(), raw.clone());
         }
         for tag in tags {
             let tag_id = tag.get_id();
-            self.database_write_transaction.set(
-                TAG_AND_OBJECT,
-                &(tag_id.clone(), object_id.clone()),
-                &([] as [u8; 0]),
-            )?;
-            self.database_write_transaction.set(
-                OBJECT_AND_TAG,
-                &(object_id.clone(), tag_id.clone()),
-                &([] as [u8; 0]),
-            )?;
+            self.database_write_transaction
+                .tag_and_object
+                .insert((tag_id.clone(), object_id.clone()), ());
+            self.database_write_transaction
+                .object_and_tag
+                .insert((object_id.clone(), tag_id.clone()), ());
             if let Object::Raw(raw) = object {
                 self.database_write_transaction
-                    .set(IDS_TO_SOURCES, &tag_id, &raw)?;
+                    .id_to_source
+                    .insert(tag_id.clone(), raw.clone());
             }
-            self.database_write_transaction.set(
-                TAG_TO_OBJECTS_COUNT,
-                &tag_id,
-                &(self
-                    .database_write_transaction
-                    .get::<Id, u32>(TAG_TO_OBJECTS_COUNT, &tag_id)?
-                    .unwrap_or(0 as u32)
-                    + 1),
-            )?;
-        }
-        self.database_write_transaction.set(
-            OBJECT_TO_TAGS_COUNT,
-            &object_id,
-            &(self
+            let current_tag_objects_count = self
                 .database_write_transaction
-                .get::<Id, u32>(OBJECT_TO_TAGS_COUNT, &object_id)?
+                .tag_to_objects_count
+                .get(&tag_id)?
                 .unwrap_or(0 as u32)
-                + 1),
-        )?;
+                + 1;
+            self.database_write_transaction
+                .tag_to_objects_count
+                .insert(tag_id.clone(), current_tag_objects_count);
+        }
+        let current_object_tags_count = self
+            .database_write_transaction
+            .object_to_tags_count
+            .get(&object_id)?
+            .unwrap_or(0 as u32)
+            + 1;
+        self.database_write_transaction
+            .object_to_tags_count
+            .insert(object_id.clone(), current_object_tags_count);
         Ok(self)
     }
 
@@ -98,39 +102,43 @@ impl<'a> WriteTransaction<'a> {
         let object_id = object.get_id();
         if self
             .database_write_transaction
-            .get::<Id, Id>(OBJECT_TO_TAGS_COUNT, &object_id)?
+            .object_to_tags_count
+            .get(&object_id)?
             .is_none()
         {
             return Ok(self);
         }
         if let Object::Raw(_) = object {
             self.database_write_transaction
-                .remove(IDS_TO_SOURCES, &object_id)?;
+                .id_to_source
+                .remove(&object_id);
         }
         let object_and_tag_iterator = self
             .database_write_transaction
-            .iter::<(Id, Id), [u8; 0]>(OBJECT_AND_TAG, Some(&(object_id.clone(), Id::default())))?
+            .object_and_tag
+            .iter(Some(&(object_id.clone(), Id::default())))?
             .take_while(|((current_object_id, _), _)| Ok(current_object_id == &object_id))
             .collect::<Vec<_>>()?;
         for ((current_object_id, current_tag_id), _) in object_and_tag_iterator {
-            self.database_write_transaction.remove(
-                TAG_AND_OBJECT,
-                &(current_tag_id.clone(), current_object_id.clone()),
-            )?;
             self.database_write_transaction
-                .remove(OBJECT_AND_TAG, &(current_object_id, current_tag_id.clone()))?;
-            self.database_write_transaction.set(
-                TAG_TO_OBJECTS_COUNT,
-                &current_tag_id,
-                &(self
-                    .database_write_transaction
-                    .get::<Id, u32>(TAG_TO_OBJECTS_COUNT, &current_tag_id)?
-                    .unwrap_or(0 as u32)
-                    - 1),
-            )?;
+                .tag_and_object
+                .remove(&(current_tag_id.clone(), current_object_id.clone()));
+            self.database_write_transaction
+                .object_and_tag
+                .remove(&(current_object_id, current_tag_id.clone()));
+            let current_tag_objects_count = self
+                .database_write_transaction
+                .tag_to_objects_count
+                .get(&current_tag_id)?
+                .unwrap_or(0 as u32)
+                - 1;
+            self.database_write_transaction
+                .tag_to_objects_count
+                .insert(current_tag_id, current_tag_objects_count);
         }
         self.database_write_transaction
-            .remove(OBJECT_TO_TAGS_COUNT, &object_id)?;
+            .object_to_tags_count
+            .remove(&object_id);
 
         Ok(self)
     }
@@ -143,7 +151,8 @@ impl<'a> WriteTransaction<'a> {
         let object_id = object.get_id();
         if self
             .database_write_transaction
-            .get::<Id, Id>(OBJECT_TO_TAGS_COUNT, &object_id)?
+            .object_to_tags_count
+            .get(&object_id)?
             .is_none()
         {
             return Ok(self);
@@ -153,74 +162,79 @@ impl<'a> WriteTransaction<'a> {
             let tag_id = tag.get_id();
             if self
                 .database_write_transaction
-                .get::<(Id, Id), [u8; 0]>(TAG_AND_OBJECT, &(tag_id.clone(), object_id.clone()))?
+                .tag_and_object
+                .get(&(tag_id.clone(), object_id.clone()))?
                 .is_none()
             {
                 continue;
             }
             self.database_write_transaction
-                .remove(TAG_AND_OBJECT, &(tag_id.clone(), object_id.clone()))?;
+                .tag_and_object
+                .remove(&(tag_id.clone(), object_id.clone()));
             self.database_write_transaction
-                .remove(OBJECT_AND_TAG, &(object_id.clone(), tag_id.clone()))?;
+                .object_and_tag
+                .remove(&(object_id.clone(), tag_id.clone()));
             let new_tag_count = self
                 .database_write_transaction
-                .get::<Id, u32>(TAG_TO_OBJECTS_COUNT, &tag_id)?
+                .tag_to_objects_count
+                .get(&tag_id)?
                 .ok_or(format!("No objects count record for tag {tag:?}"))?
                 - 1;
             if new_tag_count > 0 {
-                self.database_write_transaction.set(
-                    TAG_TO_OBJECTS_COUNT,
-                    &tag_id,
-                    &new_tag_count,
-                )?;
+                self.database_write_transaction
+                    .tag_to_objects_count
+                    .insert(tag_id.clone(), new_tag_count.clone());
             } else {
                 self.database_write_transaction
-                    .remove(TAG_TO_OBJECTS_COUNT, &tag_id)?;
+                    .tag_to_objects_count
+                    .remove(&tag_id);
                 if let Object::Raw(_) = tag {
-                    self.database_write_transaction
-                        .remove(IDS_TO_SOURCES, &tag_id)?;
+                    self.database_write_transaction.id_to_source.remove(&tag_id);
                 }
             }
             tags_removed_from_object += 1;
         }
         let object_tags_count_before_delete = self
             .database_write_transaction
-            .get::<Id, u32>(OBJECT_TO_TAGS_COUNT, &object_id)?
+            .object_to_tags_count
+            .get(&object_id)?
             .ok_or("No tags count record for object {object:?}")?;
         if tags_removed_from_object == object_tags_count_before_delete {
             self.database_write_transaction
-                .remove(OBJECT_TO_TAGS_COUNT, &object_id)?;
+                .object_to_tags_count
+                .remove(&object_id);
             if let Object::Raw(_) = object {
                 self.database_write_transaction
-                    .remove(IDS_TO_SOURCES, &object_id)?;
+                    .id_to_source
+                    .remove(&object_id);
             }
         } else {
-            self.database_write_transaction.set(
-                OBJECT_TO_TAGS_COUNT,
-                &object_id,
-                &(object_tags_count_before_delete - tags_removed_from_object),
-            )?;
+            self.database_write_transaction.object_to_tags_count.insert(
+                object_id.clone(),
+                object_tags_count_before_delete - tags_removed_from_object,
+            );
         }
 
         Ok(self)
     }
 
     pub fn get_source(&self, id: &Id) -> Result<Option<Vec<u8>>, String> {
-        self.database_write_transaction
-            .get::<Id, Vec<u8>>(IDS_TO_SOURCES, id)
+        self.database_write_transaction.id_to_source.get(id)
     }
 
     pub fn has_tag(&self, object: &Object, tag: &Object) -> Result<bool, String> {
         Ok(self
             .database_write_transaction
-            .get::<(Id, Id), [u8; 0]>(OBJECT_AND_TAG, &(object.get_id(), tag.get_id()))?
+            .object_and_tag
+            .get(&(object.get_id(), tag.get_id()))?
             .is_some())
     }
 
     pub fn get_tags(&self, object: Object) -> Result<Vec<Id>, String> {
         let object_id = object.get_id();
         self.database_write_transaction
-            .iter::<(Id, Id), [u8; 0]>(OBJECT_AND_TAG, Some(&(object_id.clone(), Id::default())))?
+            .object_and_tag
+            .iter(Some(&(object_id.clone(), Id::default())))?
             .take_while(|((current_object_id, _), _)| Ok(current_object_id == &object_id))
             .map(|((_, current_tag_id), _)| Ok(current_tag_id))
             .collect::<Vec<_>>()
@@ -228,13 +242,13 @@ impl<'a> WriteTransaction<'a> {
 }
 
 struct Cursor<'a> {
-    iterator: Box<dyn FallibleIterator<Item = ((Id, Id), [u8; 0]), Error = String> + 'a>,
+    iterator: Box<dyn FallibleIterator<Item = ((Id, Id), ()), Error = String> + 'a>,
     current_value: Option<(Id, Id)>,
 }
 
 impl<'a> Cursor<'a> {
     fn new(
-        mut iterator: Box<dyn FallibleIterator<Item = ((Id, Id), [u8; 0]), Error = String> + 'a>,
+        mut iterator: Box<dyn FallibleIterator<Item = ((Id, Id), ()), Error = String> + 'a>,
     ) -> Result<Self, String> {
         let current_value = iterator
             .next()?
@@ -255,7 +269,7 @@ impl<'a> Cursor<'a> {
 }
 
 pub struct SearchIterator<'a> {
-    database_transaction: &'a lawn::database::ReadTransaction<'a>,
+    database_transaction: &'a dream_database::ReadTransaction<'a>,
     present_tags_ids: Vec<Id>,
     absent_tags_ids: Vec<Id>,
     start_after_object: Option<Id>,
@@ -290,10 +304,8 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
                     .all(|tag_id| {
                         Ok(self
                             .database_transaction
-                            .get::<(Id, Id), [u8; 0]>(
-                                TAG_AND_OBJECT,
-                                &(tag_id.clone(), first_cursor_object.clone()),
-                            )?
+                            .tag_and_object
+                            .get(&(tag_id.clone(), first_cursor_object.clone()))?
                             .is_none())
                     })? {
                         Some(first_cursor_object)
@@ -320,23 +332,20 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
                 && self.cursors.len() <= self.index_1
             {
                 let mut cursor =
-                    Cursor::new(self.database_transaction.iter::<(Id, Id), [u8; 0]>(
-                        TAG_AND_OBJECT,
-                        Some(&(
-                            self.present_tags_ids[self.index_1].clone(),
-                            if self.index_1 == 0 {
-                                self.start_after_object.clone().unwrap_or_default()
-                            } else {
-                                self.cursors
-                                    .last()
-                                    .unwrap()
-                                    .current_value
-                                    .clone()
-                                    .unwrap()
-                                    .1
-                            },
-                        )),
-                    )?)?;
+                    Cursor::new(self.database_transaction.tag_and_object.iter(Some(&(
+                        self.present_tags_ids[self.index_1].clone(),
+                        if self.index_1 == 0 {
+                            self.start_after_object.clone().unwrap_or_default()
+                        } else {
+                            self.cursors
+                                .last()
+                                .unwrap()
+                                .current_value
+                                .clone()
+                                .unwrap()
+                                .1
+                        },
+                    )))?)?;
                 if self.index_1 == 0 && self.start_after_object.is_some() {
                     cursor.next()?;
                 }
@@ -357,19 +366,16 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
                 && self.cursors.len() <= self.index_2
             {
                 let cursor = Cursor::new(
-                    self.database_transaction.iter::<(Id, Id), [u8; 0]>(
-                        TAG_AND_OBJECT,
-                        Some(&(
-                            self.present_tags_ids[self.index_2].clone(),
-                            self.cursors
-                                .last()
-                                .unwrap()
-                                .current_value
-                                .clone()
-                                .unwrap()
-                                .1,
-                        )),
-                    )?,
+                    self.database_transaction.tag_and_object.iter(Some(&(
+                        self.present_tags_ids[self.index_2].clone(),
+                        self.cursors
+                            .last()
+                            .unwrap()
+                            .current_value
+                            .clone()
+                            .unwrap()
+                            .1,
+                    )))?,
                 )?;
                 if !cursor
                     .current_value
@@ -440,7 +446,8 @@ impl<'a> ReadTransaction<'a> {
                     let tag_id = tag.get_id();
                     if let Some(tag_objects_count) = self
                         .database_read_transaction
-                        .get::<Id, u32>(TAG_TO_OBJECTS_COUNT, &tag_id)?
+                        .tag_to_objects_count
+                        .get(&tag_id)?
                     {
                         absent_tags_ids_and_objects_count.push((tag_id, tag_objects_count));
                     }
@@ -460,7 +467,8 @@ impl<'a> ReadTransaction<'a> {
                     present_tags_ids_and_objects_count.push((
                         tag_id.clone(),
                         self.database_read_transaction
-                            .get::<Id, u32>(TAG_TO_OBJECTS_COUNT, &tag_id)?
+                            .tag_to_objects_count
+                            .get(&tag_id)?
                             .unwrap_or(0 as u32),
                     ));
                 }
@@ -483,7 +491,7 @@ impl<'a> ReadTransaction<'a> {
 impl Index {
     pub fn new(config: IndexConfig) -> Result<Self, String> {
         Ok(Self {
-            database: lawn::database::Database::new(config.database)?,
+            database: dream_database::Database::new(config.database)?,
         })
     }
 
@@ -511,5 +519,113 @@ impl Index {
                 })
             })?;
         Ok(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::path::Path;
+
+    fn new_default_database(test_name_for_isolation: String) -> Index {
+        let database_dir =
+            Path::new(format!("/tmp/dream/test/{test_name_for_isolation}").as_str()).to_path_buf();
+
+        Index::new(IndexConfig {
+            database: dream_database::DatabaseConfig {
+                tables: dream_database::TablesConfig {
+                    tag_and_object: lawn::table::TableConfig {
+                        index: lawn::index::IndexConfig {
+                            path: database_dir
+                                .join("tables")
+                                .join("tag_and_object")
+                                .join("index.idx")
+                                .to_path_buf(),
+                        },
+                        data_pool: Box::new(lawn::fixed_data_pool::FixedDataPoolConfig {
+                            path: database_dir
+                                .join("tables")
+                                .join("tag_and_object")
+                                .join("data.dat")
+                                .to_path_buf(),
+                            container_size: 32,
+                        }),
+                    },
+                    object_and_tag: lawn::table::TableConfig {
+                        index: lawn::index::IndexConfig {
+                            path: database_dir
+                                .join("tables")
+                                .join("object_and_tag")
+                                .join("index.idx")
+                                .to_path_buf(),
+                        },
+                        data_pool: Box::new(lawn::fixed_data_pool::FixedDataPoolConfig {
+                            path: database_dir
+                                .join("tables")
+                                .join("object_and_tag")
+                                .join("data.dat")
+                                .to_path_buf(),
+                            container_size: 32,
+                        }),
+                    },
+                    id_to_source: lawn::table::TableConfig {
+                        index: lawn::index::IndexConfig {
+                            path: database_dir
+                                .join("tables")
+                                .join("id_to_source")
+                                .join("index.idx")
+                                .to_path_buf(),
+                        },
+                        data_pool: Box::new(lawn::variable_data_pool::VariableDataPoolConfig {
+                            directory: database_dir
+                                .join("tables")
+                                .join("id_to_source")
+                                .join("data")
+                                .to_path_buf(),
+                            max_element_size: 65536 as usize,
+                        }),
+                    },
+                    tag_to_objects_count: lawn::table::TableConfig {
+                        index: lawn::index::IndexConfig {
+                            path: database_dir
+                                .join("tables")
+                                .join("tag_to_objects_count")
+                                .join("index.idx")
+                                .to_path_buf(),
+                        },
+                        data_pool: Box::new(lawn::fixed_data_pool::FixedDataPoolConfig {
+                            path: database_dir
+                                .join("tables")
+                                .join("tag_to_objects_count")
+                                .join("data.dat")
+                                .to_path_buf(),
+                            container_size: 20,
+                        }),
+                    },
+                    object_to_tags_count: lawn::table::TableConfig {
+                        index: lawn::index::IndexConfig {
+                            path: database_dir
+                                .join("tables")
+                                .join("object_to_tags_count")
+                                .join("index.idx")
+                                .to_path_buf(),
+                        },
+                        data_pool: Box::new(lawn::fixed_data_pool::FixedDataPoolConfig {
+                            path: database_dir
+                                .join("tables")
+                                .join("object_to_tags_count")
+                                .join("data.dat")
+                                .to_path_buf(),
+                            container_size: 20,
+                        }),
+                    },
+                },
+                log: dream_database::LogConfig {
+                    path: database_dir.join("log.dat").to_path_buf(),
+                },
+            },
+        })
+        .unwrap()
     }
 }
