@@ -11,7 +11,7 @@ pub struct Id {
     pub value: [u8; 16],
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Object {
     Raw(Vec<u8>),
     Identified(Id),
@@ -56,7 +56,7 @@ pub struct WriteTransaction<'a> {
 }
 
 impl<'a> WriteTransaction<'a> {
-    pub fn insert(&mut self, object: &Object, tags: &Vec<Object>) -> Result<&Self, String> {
+    pub fn insert(&mut self, object: &Object, tags: &Vec<Object>) -> Result<&mut Self, String> {
         let object_id = object.get_id();
         if let Object::Raw(raw) = object {
             self.database_write_transaction
@@ -98,7 +98,7 @@ impl<'a> WriteTransaction<'a> {
         Ok(self)
     }
 
-    pub fn remove_object(&mut self, object: &Object) -> Result<&Self, String> {
+    pub fn remove_object(&mut self, object: &Object) -> Result<&mut Self, String> {
         let object_id = object.get_id();
         if self
             .database_write_transaction
@@ -147,7 +147,7 @@ impl<'a> WriteTransaction<'a> {
         &mut self,
         object: &Object,
         tags: &Vec<Object>,
-    ) -> Result<&Self, String> {
+    ) -> Result<&mut Self, String> {
         let object_id = object.get_id();
         if self
             .database_write_transaction
@@ -497,7 +497,7 @@ impl Index {
 
     pub fn lock_all_and_write<F>(&mut self, f: F) -> Result<&Self, String>
     where
-        F: Fn(WriteTransaction) -> (),
+        F: Fn(WriteTransaction) -> Result<(), String>,
     {
         self.database
             .lock_all_and_write(|database_write_transaction| {
@@ -510,7 +510,7 @@ impl Index {
 
     pub fn lock_all_writes_and_read<F>(&self, f: F) -> Result<&Self, String>
     where
-        F: Fn(ReadTransaction) -> (),
+        F: Fn(ReadTransaction) -> Result<(), String>,
     {
         self.database
             .lock_all_writes_and_read(|database_read_transaction| {
@@ -528,7 +528,7 @@ mod tests {
 
     use std::path::Path;
 
-    fn new_default_database(test_name_for_isolation: String) -> Index {
+    fn new_default_index(test_name_for_isolation: &str) -> Index {
         let database_dir =
             Path::new(format!("/tmp/dream/test/{test_name_for_isolation}").as_str()).to_path_buf();
 
@@ -627,5 +627,41 @@ mod tests {
             },
         })
         .unwrap()
+    }
+
+    #[test]
+    fn test_simple() {
+        let mut index = new_default_index("test_simple");
+
+        let a = Object::Raw("a".as_bytes().to_vec());
+        let b = Object::Raw("b".as_bytes().to_vec());
+        let c = Object::Raw("c".as_bytes().to_vec());
+        let o1 = Object::Raw("o1".as_bytes().to_vec());
+        let o2 = Object::Raw("o2".as_bytes().to_vec());
+        let o3 = Object::Raw("o3".as_bytes().to_vec());
+
+        index
+            .lock_all_and_write(|mut transaction| {
+                transaction
+                    .insert(&o1, &vec![a.clone()])
+                    .unwrap()
+                    .insert(&o2, &vec![a.clone(), b.clone()])
+                    .unwrap()
+                    .insert(&o3, &vec![a.clone(), b.clone(), c.clone()])
+                    .unwrap();
+                Ok(())
+            })
+            .unwrap();
+        index
+            .lock_all_writes_and_read(|transaction| {
+                assert_eq!(
+                    transaction
+                        .search(&vec![a.clone(), b.clone(), c.clone()], &vec![], None)?
+                        .collect::<Vec<_>>()?,
+                    [o3.get_id()]
+                );
+                Ok(())
+            })
+            .unwrap();
     }
 }
