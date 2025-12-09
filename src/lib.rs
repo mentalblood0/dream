@@ -478,23 +478,23 @@ impl<'a> ReadTransaction<'a> {
                 .collect::<Vec<_>>()
         };
         Ok(match present_tags_ids.len() {
-            0 => {
-                let absent_tags_ids_set = HashSet::<Id>::from_iter(absent_tags_ids);
-                Box::new(
-                    self.database_read_transaction
-                        .tag_and_object
-                        .iter(None)?
-                        .map(|((tag_id, object_id), _)| Ok((tag_id, object_id)))
-                        .filter(move |(tag_id, _)| Ok(!absent_tags_ids_set.contains(tag_id)))
-                        .map(|(_, object_id)| Ok(object_id)),
-                )
-            }
+            0 => Box::new(
+                self.database_read_transaction
+                    .object_to_tags_count
+                    .iter(Some(&start_after_object.clone().unwrap_or_default()))?
+                    .skip(if start_after_object.is_some() { 1 } else { 0 })
+                    .map(|(object_id, _)| Ok(object_id)),
+            ),
             1 => {
                 let absent_tags_ids_set = HashSet::<Id>::from_iter(absent_tags_ids);
                 Box::new(
                     self.database_read_transaction
                         .tag_and_object
-                        .iter(Some(&(present_tags_ids[0].clone(), Id::default())))?
+                        .iter(Some(&(
+                            present_tags_ids[0].clone(),
+                            start_after_object.clone().unwrap_or_default(),
+                        )))?
+                        .skip(if start_after_object.is_some() { 1 } else { 0 })
                         .map(|((tag_id, object_id), _)| Ok((tag_id, object_id)))
                         .take_while(move |(tag_id, _)| Ok(tag_id == &present_tags_ids[0]))
                         .filter(move |(tag_id, _)| Ok(!absent_tags_ids_set.contains(tag_id)))
@@ -703,6 +703,18 @@ mod tests {
                 assert_eq!(
                     transaction
                         .search(&vec![a.clone()], &vec![a.clone()], None)?
+                        .collect::<Vec<_>>()?,
+                    []
+                );
+                assert_eq!(
+                    transaction
+                        .search(&vec![a.clone()], &vec![], Some(o1.get_id()))?
+                        .collect::<Vec<_>>()?,
+                    []
+                );
+                assert_eq!(
+                    transaction
+                        .search(&vec![], &vec![], Some(o1.get_id()))?
                         .collect::<Vec<_>>()?,
                     []
                 );
