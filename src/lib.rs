@@ -484,8 +484,9 @@ impl<'a> ReadTransaction<'a> {
                     self.database_read_transaction
                         .tag_and_object
                         .iter(None)?
-                        .map(|((tag_id, _), _)| Ok(tag_id))
-                        .filter(move |tag_id| Ok(!absent_tags_ids_set.contains(tag_id))),
+                        .map(|((tag_id, object_id), _)| Ok((tag_id, object_id)))
+                        .filter(move |(tag_id, _)| Ok(!absent_tags_ids_set.contains(tag_id)))
+                        .map(|(_, object_id)| Ok(object_id)),
                 )
             }
             1 => {
@@ -494,11 +495,10 @@ impl<'a> ReadTransaction<'a> {
                     self.database_read_transaction
                         .tag_and_object
                         .iter(Some(&(present_tags_ids[0].clone(), Id::default())))?
-                        .take_while(move |((current_tag_id, _), _)| {
-                            Ok(current_tag_id == &present_tags_ids[0])
-                        })
-                        .map(|((_, object_id), _)| Ok(object_id))
-                        .filter(move |tag_id| Ok(!absent_tags_ids_set.contains(tag_id))),
+                        .map(|((tag_id, object_id), _)| Ok((tag_id, object_id)))
+                        .take_while(move |(tag_id, _)| Ok(tag_id == &present_tags_ids[0]))
+                        .filter(move |(tag_id, _)| Ok(!absent_tags_ids_set.contains(tag_id)))
+                        .map(|(_, object_id)| Ok(object_id)),
                 )
             }
             2.. => Box::new(SearchIterator {
@@ -698,6 +698,13 @@ mod tests {
                         .search(&vec![a.clone()], &vec![], None)?
                         .collect::<Vec<_>>()?,
                     [o3.get_id(), o2.get_id(), o1.get_id()]
+                );
+
+                assert_eq!(
+                    transaction
+                        .search(&vec![a.clone()], &vec![a.clone()], None)?
+                        .collect::<Vec<_>>()?,
+                    []
                 );
                 Ok(())
             })
