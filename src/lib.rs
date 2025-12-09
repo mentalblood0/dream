@@ -51,11 +51,11 @@ pub struct ReadTransaction<'a> {
     database_read_transaction: dream_database::ReadTransaction<'a>,
 }
 
-pub struct WriteTransaction<'a> {
-    database_write_transaction: dream_database::WriteTransaction<'a>,
+pub struct WriteTransaction<'a, 'b> {
+    database_write_transaction: &'a mut dream_database::WriteTransaction<'b>,
 }
 
-impl<'a> WriteTransaction<'a> {
+impl<'a, 'b> WriteTransaction<'a, 'b> {
     pub fn insert(&mut self, object: &Object, tags: &Vec<Object>) -> Result<&mut Self, String> {
         let object_id = object.get_id();
         if let Object::Raw(raw) = object {
@@ -546,16 +546,17 @@ impl Index {
         })
     }
 
-    pub fn lock_all_and_write<F>(&mut self, f: F) -> Result<&Self, String>
+    pub fn lock_all_and_write<'a, F>(&'a mut self, f: F) -> Result<&'a mut Self, String>
     where
-        F: Fn(WriteTransaction) -> Result<(), String>,
+        F: Fn(&mut WriteTransaction<'_, '_>) -> Result<(), String>,
     {
         self.database
             .lock_all_and_write(|database_write_transaction| {
-                f(WriteTransaction {
+                f(&mut WriteTransaction {
                     database_write_transaction,
                 })
             })?;
+
         Ok(self)
     }
 
@@ -692,7 +693,7 @@ mod tests {
         let o3 = Object::Raw("o3".as_bytes().to_vec());
 
         index
-            .lock_all_and_write(|mut transaction| {
+            .lock_all_and_write(|transaction| {
                 transaction
                     .insert(&o1, &vec![a.clone()])
                     .unwrap()
@@ -700,6 +701,7 @@ mod tests {
                     .unwrap()
                     .insert(&o3, &vec![a.clone(), b.clone(), c.clone()])
                     .unwrap();
+                // transaction.database_write_transaction.commit()?;
                 Ok(())
             })
             .unwrap();
@@ -747,6 +749,19 @@ mod tests {
                         .search(&vec![], &vec![a.clone(), b.clone(), c.clone()], None)?
                         .collect::<Vec<_>>()?,
                     []
+                );
+
+                assert_eq!(
+                    transaction
+                        .search(&vec![a.clone()], &vec![b.clone()], None)?
+                        .collect::<Vec<_>>()?,
+                    [o1.get_id()]
+                );
+                assert_eq!(
+                    transaction
+                        .search(&vec![a.clone()], &vec![c.clone()], None)?
+                        .collect::<Vec<_>>()?,
+                    [o2.get_id(), o1.get_id()]
                 );
                 Ok(())
             })

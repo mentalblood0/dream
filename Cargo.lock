@@ -161,7 +161,7 @@ checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
 [[package]]
 name = "lawn"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/lawn#e5957f4f152a04afd790e55bb65c75ab34f1b5c8"
+source = "git+https://github.com/mentalblood0/lawn#12dec09a171599fae63a60ac9098f0ad4c946356"
 dependencies = [
  "bincode",
  "fallible-iterator",
@@ -259,7 +259,7 @@ dependencies = [
 [[package]]
 name = "serde-saphyr"
 version = "0.0.11"
-source = "git+https://github.com/bourumir-wyngs/serde-saphyr#caa246e2095610a137388023f43fc21ed1e268e9"
+source = "git+https://github.com/bourumir-wyngs/serde-saphyr#dfab0a354c4230a2b977be93522ea63a1931bbb8"
 dependencies = [
  "ahash",
  "base64",
