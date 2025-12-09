@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use fallible_iterator::FallibleIterator;
 use xxhash_rust::xxh3::xxh3_128;
 
@@ -438,25 +436,6 @@ impl<'a> ReadTransaction<'a> {
         absent_tags: &Vec<Object>,
         start_after_object: Option<Id>,
     ) -> Result<Box<dyn FallibleIterator<Item = Id, Error = String> + '_>, String> {
-        let present_tags_ids = {
-            let mut present_tags_ids_and_objects_count: Vec<(Id, u32)> = Vec::new();
-            for tag in present_tags {
-                let tag_id = tag.get_id();
-                present_tags_ids_and_objects_count.push((
-                    tag_id.clone(),
-                    self.database_read_transaction
-                        .tag_to_objects_count
-                        .get(&tag_id)?
-                        .unwrap_or(0 as u32),
-                ));
-            }
-            present_tags_ids_and_objects_count
-                .sort_by_key(|(_, tag_objects_count)| *tag_objects_count);
-            present_tags_ids_and_objects_count
-                .into_iter()
-                .map(|(tag, _)| tag)
-                .collect::<Vec<_>>()
-        };
         let absent_tags_ids = {
             let mut absent_tags_ids_and_objects_count: Vec<(Id, u32)> = Vec::new();
             for tag in absent_tags {
@@ -477,34 +456,79 @@ impl<'a> ReadTransaction<'a> {
                 .map(|(tag, _)| tag)
                 .collect::<Vec<_>>()
         };
-        Ok(match present_tags_ids.len() {
+        Ok(match present_tags.len() {
             0 => Box::new(
                 self.database_read_transaction
                     .object_to_tags_count
                     .iter(Some(&start_after_object.clone().unwrap_or_default()))?
                     .skip(if start_after_object.is_some() { 1 } else { 0 })
-                    .map(|(object_id, _)| Ok(object_id)),
+                    .map(|(object_id, _)| Ok(object_id))
+                    .filter(move |object_id| {
+                        fallible_iterator::convert(
+                            absent_tags_ids
+                                .iter()
+                                .map(|id| Result::<Id, String>::Ok(id.clone())),
+                        )
+                        .all(|absent_tag_id| {
+                            Ok(self
+                                .database_read_transaction
+                                .tag_and_object
+                                .get(&(absent_tag_id.clone(), object_id.clone()))?
+                                .is_none())
+                        })
+                    }),
             ),
             1 => {
-                let absent_tags_ids_set = HashSet::<Id>::from_iter(absent_tags_ids);
+                let search_tag_id = present_tags[0].get_id();
                 Box::new(
                     self.database_read_transaction
                         .tag_and_object
                         .iter(Some(&(
-                            present_tags_ids[0].clone(),
+                            search_tag_id.clone(),
                             start_after_object.clone().unwrap_or_default(),
                         )))?
                         .skip(if start_after_object.is_some() { 1 } else { 0 })
                         .map(|((tag_id, object_id), _)| Ok((tag_id, object_id)))
-                        .take_while(move |(tag_id, _)| Ok(tag_id == &present_tags_ids[0]))
-                        .filter(move |(tag_id, _)| Ok(!absent_tags_ids_set.contains(tag_id)))
-                        .map(|(_, object_id)| Ok(object_id)),
+                        .take_while(move |(tag_id, _)| Ok(tag_id == &search_tag_id))
+                        .map(|(_, object_id)| Ok(object_id))
+                        .filter(move |object_id| {
+                            fallible_iterator::convert(
+                                absent_tags_ids
+                                    .iter()
+                                    .map(|id| Result::<Id, String>::Ok(id.clone())),
+                            )
+                            .all(|absent_tag_id| {
+                                Ok(self
+                                    .database_read_transaction
+                                    .tag_and_object
+                                    .get(&(absent_tag_id.clone(), object_id.clone()))?
+                                    .is_none())
+                            })
+                        }),
                 )
             }
             2.. => Box::new(SearchIterator {
                 database_transaction: &self.database_read_transaction,
                 absent_tags_ids,
-                present_tags_ids,
+                present_tags_ids: {
+                    let mut present_tags_ids_and_objects_count: Vec<(Id, u32)> = Vec::new();
+                    for tag in present_tags {
+                        let tag_id = tag.get_id();
+                        present_tags_ids_and_objects_count.push((
+                            tag_id.clone(),
+                            self.database_read_transaction
+                                .tag_to_objects_count
+                                .get(&tag_id)?
+                                .unwrap_or(0 as u32),
+                        ));
+                    }
+                    present_tags_ids_and_objects_count
+                        .sort_by_key(|(_, tag_objects_count)| *tag_objects_count);
+                    present_tags_ids_and_objects_count
+                        .into_iter()
+                        .map(|(tag, _)| tag)
+                        .collect::<Vec<_>>()
+                },
                 start_after_object,
                 cursors: Vec::new(),
                 index_1: 0 as usize,
@@ -715,6 +739,12 @@ mod tests {
                 assert_eq!(
                     transaction
                         .search(&vec![], &vec![], Some(o1.get_id()))?
+                        .collect::<Vec<_>>()?,
+                    []
+                );
+                assert_eq!(
+                    transaction
+                        .search(&vec![], &vec![a.clone(), b.clone(), c.clone()], None)?
                         .collect::<Vec<_>>()?,
                     []
                 );
