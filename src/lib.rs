@@ -1,3 +1,4 @@
+use anyhow::{Error, Result, anyhow};
 use fallible_iterator::FallibleIterator;
 use xxhash_rust::xxh3::xxh3_128;
 
@@ -56,7 +57,7 @@ pub struct WriteTransaction<'a, 'b> {
 }
 
 impl<'a, 'b> WriteTransaction<'a, 'b> {
-    pub fn insert(&mut self, object: &Object, tags: &Vec<Object>) -> Result<&mut Self, String> {
+    pub fn insert(&mut self, object: &Object, tags: &Vec<Object>) -> Result<&mut Self> {
         let object_id = object.get_id();
         if let Object::Raw(raw) = object {
             self.database_write_transaction
@@ -98,7 +99,7 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
         Ok(self)
     }
 
-    pub fn remove_object(&mut self, object: &Object) -> Result<&mut Self, String> {
+    pub fn remove_object(&mut self, object: &Object) -> Result<&mut Self> {
         let object_id = object.get_id();
         if self
             .database_write_transaction
@@ -147,7 +148,7 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
         &mut self,
         object: &Object,
         tags: &Vec<Object>,
-    ) -> Result<&mut Self, String> {
+    ) -> Result<&mut Self> {
         let object_id = object.get_id();
         if self
             .database_write_transaction
@@ -178,7 +179,7 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
                 .database_write_transaction
                 .tag_to_objects_count
                 .get(&tag_id)?
-                .ok_or(format!("No objects count record for tag {tag:?}"))?
+                .ok_or(anyhow!("No objects count record for tag {tag:?}"))?
                 - 1;
             if new_tag_count > 0 {
                 self.database_write_transaction
@@ -198,7 +199,7 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
             .database_write_transaction
             .object_to_tags_count
             .get(&object_id)?
-            .ok_or("No tags count record for object {object:?}")?;
+            .ok_or(anyhow!("No tags count record for object {object:?}"))?;
         if tags_removed_from_object == object_tags_count_before_delete {
             self.database_write_transaction
                 .object_to_tags_count
@@ -218,11 +219,11 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
         Ok(self)
     }
 
-    pub fn get_source(&self, id: &Id) -> Result<Option<Vec<u8>>, String> {
+    pub fn get_source(&self, id: &Id) -> Result<Option<Vec<u8>>> {
         self.database_write_transaction.id_to_source.get(id)
     }
 
-    pub fn has_tag(&self, object: &Object, tag: &Object) -> Result<bool, String> {
+    pub fn has_tag(&self, object: &Object, tag: &Object) -> Result<bool> {
         Ok(self
             .database_write_transaction
             .object_and_tag
@@ -230,7 +231,7 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
             .is_some())
     }
 
-    pub fn get_tags(&self, object: Object) -> Result<Vec<Id>, String> {
+    pub fn get_tags(&self, object: Object) -> Result<Vec<Id>> {
         let object_id = object.get_id();
         self.database_write_transaction
             .object_and_tag
@@ -242,14 +243,14 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
 }
 
 struct Cursor<'a> {
-    iterator: Box<dyn FallibleIterator<Item = ((Id, Id), ()), Error = String> + 'a>,
+    iterator: Box<dyn FallibleIterator<Item = ((Id, Id), ()), Error = Error> + 'a>,
     current_value: Option<(Id, Id)>,
 }
 
 impl<'a> Cursor<'a> {
     fn new(
-        mut iterator: Box<dyn FallibleIterator<Item = ((Id, Id), ()), Error = String> + 'a>,
-    ) -> Result<Self, String> {
+        mut iterator: Box<dyn FallibleIterator<Item = ((Id, Id), ()), Error = Error> + 'a>,
+    ) -> Result<Self> {
         let current_value = iterator
             .next()?
             .and_then(|(current_value, _)| Some(current_value));
@@ -259,7 +260,7 @@ impl<'a> Cursor<'a> {
         })
     }
 
-    fn next(&mut self) -> Result<(), String> {
+    fn next(&mut self) -> Result<()> {
         self.current_value = self
             .iterator
             .next()?
@@ -281,7 +282,7 @@ pub struct SearchIterator<'a> {
 
 impl<'a> FallibleIterator for SearchIterator<'a> {
     type Item = Id;
-    type Error = String;
+    type Error = Error;
 
     fn next(&mut self) -> Result<Option<Self::Item>, Self::Error> {
         if self.end {
@@ -299,7 +300,7 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
                     let result = if fallible_iterator::convert(
                         self.absent_tags_ids
                             .iter()
-                            .map(|id| Result::<Id, String>::Ok(id.clone())),
+                            .map(|id| Result::<Id>::Ok(id.clone())),
                     )
                     .all(|tag_id| {
                         Ok(self
@@ -435,7 +436,7 @@ impl<'a> ReadTransaction<'a> {
         present_tags: &Vec<Object>,
         absent_tags: &Vec<Object>,
         start_after_object: Option<Id>,
-    ) -> Result<Box<dyn FallibleIterator<Item = Id, Error = String> + '_>, String> {
+    ) -> Result<Box<dyn FallibleIterator<Item = Id, Error = Error> + '_>> {
         let absent_tags_ids = {
             let mut absent_tags_ids_and_objects_count: Vec<(Id, u32)> = Vec::new();
             for tag in absent_tags {
@@ -467,7 +468,7 @@ impl<'a> ReadTransaction<'a> {
                         fallible_iterator::convert(
                             absent_tags_ids
                                 .iter()
-                                .map(|id| Result::<Id, String>::Ok(id.clone())),
+                                .map(|id| Result::<Id>::Ok(id.clone())),
                         )
                         .all(|absent_tag_id| {
                             Ok(self
@@ -495,7 +496,7 @@ impl<'a> ReadTransaction<'a> {
                             fallible_iterator::convert(
                                 absent_tags_ids
                                     .iter()
-                                    .map(|id| Result::<Id, String>::Ok(id.clone())),
+                                    .map(|id| Result::<Id>::Ok(id.clone())),
                             )
                             .all(|absent_tag_id| {
                                 Ok(self
@@ -540,15 +541,15 @@ impl<'a> ReadTransaction<'a> {
 }
 
 impl Index {
-    pub fn new(config: IndexConfig) -> Result<Self, String> {
+    pub fn new(config: IndexConfig) -> Result<Self> {
         Ok(Self {
             database: dream_database::Database::new(config.database)?,
         })
     }
 
-    pub fn lock_all_and_write<'a, F>(&'a mut self, f: F) -> Result<&'a mut Self, String>
+    pub fn lock_all_and_write<'a, F>(&'a mut self, f: F) -> Result<&'a mut Self>
     where
-        F: Fn(&mut WriteTransaction<'_, '_>) -> Result<(), String>,
+        F: Fn(&mut WriteTransaction<'_, '_>) -> Result<()>,
     {
         self.database
             .lock_all_and_write(|database_write_transaction| {
@@ -560,9 +561,9 @@ impl Index {
         Ok(self)
     }
 
-    pub fn lock_all_writes_and_read<F>(&self, f: F) -> Result<&Self, String>
+    pub fn lock_all_writes_and_read<F>(&self, f: F) -> Result<&Self>
     where
-        F: Fn(ReadTransaction) -> Result<(), String>,
+        F: Fn(ReadTransaction) -> Result<()>,
     {
         self.database
             .lock_all_writes_and_read(|database_read_transaction| {
