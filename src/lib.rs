@@ -5,6 +5,8 @@ use xxhash_rust::xxh3::xxh3_128;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use std::ops::Deref;
+
 #[derive(
     Clone, Default, PartialEq, PartialOrd, Debug, bincode::Encode, bincode::Decode, Eq, Ord, Hash,
 )]
@@ -49,51 +51,169 @@ pub struct Index {
 }
 
 pub struct ReadTransaction<'a> {
-    database_read_transaction: dream_database::ReadTransaction<'a>,
+    database_transaction: dream_database::ReadTransaction<'a>,
 }
 
 pub struct WriteTransaction<'a, 'b> {
-    database_write_transaction: &'a mut dream_database::WriteTransaction<'b>,
+    database_transaction: &'a mut dream_database::WriteTransaction<'b>,
+}
+
+macro_rules! define_search_fn {
+    () => {
+        pub fn search(
+            &self,
+            present_tags: &Vec<Object>,
+            absent_tags: &Vec<Object>,
+            start_after_object: Option<Id>,
+        ) -> Result<Box<dyn FallibleIterator<Item = Id, Error = Error> + '_>> {
+            let absent_tags_ids = {
+                let mut absent_tags_ids_and_objects_count: Vec<(Id, u32)> = Vec::new();
+                for tag in absent_tags {
+                    let tag_id = tag.get_id();
+                    if let Some(tag_objects_count) = self
+                        .database_transaction
+                        .tag_to_objects_count
+                        .get(&tag_id)?
+                    {
+                        absent_tags_ids_and_objects_count.push((tag_id, tag_objects_count));
+                    }
+                }
+                absent_tags_ids_and_objects_count
+                    .sort_by_key(|(_, tag_objects_count)| *tag_objects_count);
+                absent_tags_ids_and_objects_count.reverse();
+                absent_tags_ids_and_objects_count
+                    .into_iter()
+                    .map(|(tag, _)| tag)
+                    .collect::<Vec<_>>()
+            };
+            Ok(match present_tags.len() {
+                0 => Box::new(
+                    self.database_transaction
+                        .object_to_tags_count
+                        .iter(Some(&start_after_object.clone().unwrap_or_default()))?
+                        .skip(if start_after_object.is_some() { 1 } else { 0 })
+                        .map(|(object_id, _)| Ok(object_id))
+                        .filter(move |object_id| {
+                            fallible_iterator::convert(
+                                absent_tags_ids
+                                    .iter()
+                                    .map(|id| Result::<Id>::Ok(id.clone())),
+                            )
+                            .all(|absent_tag_id| {
+                                Ok(self
+                                    .database_transaction
+                                    .tag_and_object
+                                    .get(&(absent_tag_id.clone(), object_id.clone()))?
+                                    .is_none())
+                            })
+                        }),
+                ),
+                1 => {
+                    let search_tag_id = present_tags[0].get_id();
+                    Box::new(
+                        self.database_transaction
+                            .tag_and_object
+                            .iter(Some(&(
+                                search_tag_id.clone(),
+                                start_after_object.clone().unwrap_or_default(),
+                            )))?
+                            .skip(if start_after_object.is_some() { 1 } else { 0 })
+                            .map(|((tag_id, object_id), _)| Ok((tag_id, object_id)))
+                            .take_while(move |(tag_id, _)| Ok(tag_id == &search_tag_id))
+                            .map(|(_, object_id)| Ok(object_id))
+                            .filter(move |object_id| {
+                                fallible_iterator::convert(
+                                    absent_tags_ids
+                                        .iter()
+                                        .map(|id| Result::<Id>::Ok(id.clone())),
+                                )
+                                .all(|absent_tag_id| {
+                                    Ok(self
+                                        .database_transaction
+                                        .tag_and_object
+                                        .get(&(absent_tag_id.clone(), object_id.clone()))?
+                                        .is_none())
+                                })
+                            }),
+                    )
+                }
+                2.. => Box::new(SearchIterator {
+                    database_transaction: self.database_transaction.deref(),
+                    absent_tags_ids,
+                    present_tags_ids: {
+                        let mut present_tags_ids_and_objects_count: Vec<(Id, u32)> = Vec::new();
+                        for tag in present_tags {
+                            let tag_id = tag.get_id();
+                            present_tags_ids_and_objects_count.push((
+                                tag_id.clone(),
+                                self.database_transaction
+                                    .tag_to_objects_count
+                                    .get(&tag_id)?
+                                    .unwrap_or(0 as u32),
+                            ));
+                        }
+                        present_tags_ids_and_objects_count
+                            .sort_by_key(|(_, tag_objects_count)| *tag_objects_count);
+                        present_tags_ids_and_objects_count
+                            .into_iter()
+                            .map(|(tag, _)| tag)
+                            .collect::<Vec<_>>()
+                    },
+                    start_after_object,
+                    cursors: Vec::new(),
+                    index_1: 0 as usize,
+                    index_2: 1 as usize,
+                    end: false,
+                }),
+            })
+        }
+    };
+}
+
+impl<'a> ReadTransaction<'a> {
+    define_search_fn!();
 }
 
 impl<'a, 'b> WriteTransaction<'a, 'b> {
+    define_search_fn!();
+
     pub fn insert(&mut self, object: &Object, tags: &Vec<Object>) -> Result<&mut Self> {
         let object_id = object.get_id();
         if let Object::Raw(raw) = object {
-            self.database_write_transaction
+            self.database_transaction
                 .id_to_source
                 .insert(object_id.clone(), raw.clone());
         }
         for tag in tags {
             let tag_id = tag.get_id();
-            self.database_write_transaction
+            self.database_transaction
                 .tag_and_object
                 .insert((tag_id.clone(), object_id.clone()), ());
-            self.database_write_transaction
+            self.database_transaction
                 .object_and_tag
                 .insert((object_id.clone(), tag_id.clone()), ());
             if let Object::Raw(raw) = object {
-                self.database_write_transaction
+                self.database_transaction
                     .id_to_source
                     .insert(tag_id.clone(), raw.clone());
             }
             let current_tag_objects_count = self
-                .database_write_transaction
+                .database_transaction
                 .tag_to_objects_count
                 .get(&tag_id)?
                 .unwrap_or(0 as u32)
                 + 1;
-            self.database_write_transaction
+            self.database_transaction
                 .tag_to_objects_count
                 .insert(tag_id.clone(), current_tag_objects_count);
         }
         let current_object_tags_count = self
-            .database_write_transaction
+            .database_transaction
             .object_to_tags_count
             .get(&object_id)?
             .unwrap_or(0 as u32)
             + 1;
-        self.database_write_transaction
+        self.database_transaction
             .object_to_tags_count
             .insert(object_id.clone(), current_object_tags_count);
         Ok(self)
@@ -102,7 +222,7 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
     pub fn remove_object(&mut self, object: &Object) -> Result<&mut Self> {
         let object_id = object.get_id();
         if self
-            .database_write_transaction
+            .database_transaction
             .object_to_tags_count
             .get(&object_id)?
             .is_none()
@@ -110,34 +230,32 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
             return Ok(self);
         }
         if let Object::Raw(_) = object {
-            self.database_write_transaction
-                .id_to_source
-                .remove(&object_id);
+            self.database_transaction.id_to_source.remove(&object_id);
         }
         let object_and_tag_iterator = self
-            .database_write_transaction
+            .database_transaction
             .object_and_tag
             .iter(Some(&(object_id.clone(), Id::default())))?
             .take_while(|((current_object_id, _), _)| Ok(current_object_id == &object_id))
             .collect::<Vec<_>>()?;
         for ((current_object_id, current_tag_id), _) in object_and_tag_iterator {
-            self.database_write_transaction
+            self.database_transaction
                 .tag_and_object
                 .remove(&(current_tag_id.clone(), current_object_id.clone()));
-            self.database_write_transaction
+            self.database_transaction
                 .object_and_tag
                 .remove(&(current_object_id, current_tag_id.clone()));
             let current_tag_objects_count = self
-                .database_write_transaction
+                .database_transaction
                 .tag_to_objects_count
                 .get(&current_tag_id)?
                 .unwrap_or(0 as u32)
                 - 1;
-            self.database_write_transaction
+            self.database_transaction
                 .tag_to_objects_count
                 .insert(current_tag_id, current_tag_objects_count);
         }
-        self.database_write_transaction
+        self.database_transaction
             .object_to_tags_count
             .remove(&object_id);
 
@@ -151,7 +269,7 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
     ) -> Result<&mut Self> {
         let object_id = object.get_id();
         if self
-            .database_write_transaction
+            .database_transaction
             .object_to_tags_count
             .get(&object_id)?
             .is_none()
@@ -162,55 +280,53 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
         for tag in tags {
             let tag_id = tag.get_id();
             if self
-                .database_write_transaction
+                .database_transaction
                 .tag_and_object
                 .get(&(tag_id.clone(), object_id.clone()))?
                 .is_none()
             {
                 continue;
             }
-            self.database_write_transaction
+            self.database_transaction
                 .tag_and_object
                 .remove(&(tag_id.clone(), object_id.clone()));
-            self.database_write_transaction
+            self.database_transaction
                 .object_and_tag
                 .remove(&(object_id.clone(), tag_id.clone()));
             let new_tag_count = self
-                .database_write_transaction
+                .database_transaction
                 .tag_to_objects_count
                 .get(&tag_id)?
                 .ok_or(anyhow!("No objects count record for tag {tag:?}"))?
                 - 1;
             if new_tag_count > 0 {
-                self.database_write_transaction
+                self.database_transaction
                     .tag_to_objects_count
                     .insert(tag_id.clone(), new_tag_count.clone());
             } else {
-                self.database_write_transaction
+                self.database_transaction
                     .tag_to_objects_count
                     .remove(&tag_id);
                 if let Object::Raw(_) = tag {
-                    self.database_write_transaction.id_to_source.remove(&tag_id);
+                    self.database_transaction.id_to_source.remove(&tag_id);
                 }
             }
             tags_removed_from_object += 1;
         }
         let object_tags_count_before_delete = self
-            .database_write_transaction
+            .database_transaction
             .object_to_tags_count
             .get(&object_id)?
             .ok_or(anyhow!("No tags count record for object {object:?}"))?;
         if tags_removed_from_object == object_tags_count_before_delete {
-            self.database_write_transaction
+            self.database_transaction
                 .object_to_tags_count
                 .remove(&object_id);
             if let Object::Raw(_) = object {
-                self.database_write_transaction
-                    .id_to_source
-                    .remove(&object_id);
+                self.database_transaction.id_to_source.remove(&object_id);
             }
         } else {
-            self.database_write_transaction.object_to_tags_count.insert(
+            self.database_transaction.object_to_tags_count.insert(
                 object_id.clone(),
                 object_tags_count_before_delete - tags_removed_from_object,
             );
@@ -220,12 +336,12 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
     }
 
     pub fn get_source(&self, id: &Id) -> Result<Option<Vec<u8>>> {
-        self.database_write_transaction.id_to_source.get(id)
+        self.database_transaction.id_to_source.get(id)
     }
 
     pub fn has_tag(&self, object: &Object, tag: &Object) -> Result<bool> {
         Ok(self
-            .database_write_transaction
+            .database_transaction
             .object_and_tag
             .get(&(object.get_id(), tag.get_id()))?
             .is_some())
@@ -233,7 +349,7 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
 
     pub fn get_tags(&self, object: Object) -> Result<Vec<Id>> {
         let object_id = object.get_id();
-        self.database_write_transaction
+        self.database_transaction
             .object_and_tag
             .iter(Some(&(object_id.clone(), Id::default())))?
             .take_while(|((current_object_id, _), _)| Ok(current_object_id == &object_id))
@@ -270,7 +386,7 @@ impl<'a> Cursor<'a> {
 }
 
 pub struct SearchIterator<'a> {
-    database_transaction: &'a dream_database::ReadTransaction<'a>,
+    database_transaction: &'a dream_database::TablesTransactions,
     present_tags_ids: Vec<Id>,
     absent_tags_ids: Vec<Id>,
     start_after_object: Option<Id>,
@@ -430,116 +546,6 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
     }
 }
 
-impl<'a> ReadTransaction<'a> {
-    pub fn search(
-        &self,
-        present_tags: &Vec<Object>,
-        absent_tags: &Vec<Object>,
-        start_after_object: Option<Id>,
-    ) -> Result<Box<dyn FallibleIterator<Item = Id, Error = Error> + '_>> {
-        let absent_tags_ids = {
-            let mut absent_tags_ids_and_objects_count: Vec<(Id, u32)> = Vec::new();
-            for tag in absent_tags {
-                let tag_id = tag.get_id();
-                if let Some(tag_objects_count) = self
-                    .database_read_transaction
-                    .tag_to_objects_count
-                    .get(&tag_id)?
-                {
-                    absent_tags_ids_and_objects_count.push((tag_id, tag_objects_count));
-                }
-            }
-            absent_tags_ids_and_objects_count
-                .sort_by_key(|(_, tag_objects_count)| *tag_objects_count);
-            absent_tags_ids_and_objects_count.reverse();
-            absent_tags_ids_and_objects_count
-                .into_iter()
-                .map(|(tag, _)| tag)
-                .collect::<Vec<_>>()
-        };
-        Ok(match present_tags.len() {
-            0 => Box::new(
-                self.database_read_transaction
-                    .object_to_tags_count
-                    .iter(Some(&start_after_object.clone().unwrap_or_default()))?
-                    .skip(if start_after_object.is_some() { 1 } else { 0 })
-                    .map(|(object_id, _)| Ok(object_id))
-                    .filter(move |object_id| {
-                        fallible_iterator::convert(
-                            absent_tags_ids
-                                .iter()
-                                .map(|id| Result::<Id>::Ok(id.clone())),
-                        )
-                        .all(|absent_tag_id| {
-                            Ok(self
-                                .database_read_transaction
-                                .tag_and_object
-                                .get(&(absent_tag_id.clone(), object_id.clone()))?
-                                .is_none())
-                        })
-                    }),
-            ),
-            1 => {
-                let search_tag_id = present_tags[0].get_id();
-                Box::new(
-                    self.database_read_transaction
-                        .tag_and_object
-                        .iter(Some(&(
-                            search_tag_id.clone(),
-                            start_after_object.clone().unwrap_or_default(),
-                        )))?
-                        .skip(if start_after_object.is_some() { 1 } else { 0 })
-                        .map(|((tag_id, object_id), _)| Ok((tag_id, object_id)))
-                        .take_while(move |(tag_id, _)| Ok(tag_id == &search_tag_id))
-                        .map(|(_, object_id)| Ok(object_id))
-                        .filter(move |object_id| {
-                            fallible_iterator::convert(
-                                absent_tags_ids
-                                    .iter()
-                                    .map(|id| Result::<Id>::Ok(id.clone())),
-                            )
-                            .all(|absent_tag_id| {
-                                Ok(self
-                                    .database_read_transaction
-                                    .tag_and_object
-                                    .get(&(absent_tag_id.clone(), object_id.clone()))?
-                                    .is_none())
-                            })
-                        }),
-                )
-            }
-            2.. => Box::new(SearchIterator {
-                database_transaction: &self.database_read_transaction,
-                absent_tags_ids,
-                present_tags_ids: {
-                    let mut present_tags_ids_and_objects_count: Vec<(Id, u32)> = Vec::new();
-                    for tag in present_tags {
-                        let tag_id = tag.get_id();
-                        present_tags_ids_and_objects_count.push((
-                            tag_id.clone(),
-                            self.database_read_transaction
-                                .tag_to_objects_count
-                                .get(&tag_id)?
-                                .unwrap_or(0 as u32),
-                        ));
-                    }
-                    present_tags_ids_and_objects_count
-                        .sort_by_key(|(_, tag_objects_count)| *tag_objects_count);
-                    present_tags_ids_and_objects_count
-                        .into_iter()
-                        .map(|(tag, _)| tag)
-                        .collect::<Vec<_>>()
-                },
-                start_after_object,
-                cursors: Vec::new(),
-                index_1: 0 as usize,
-                index_2: 1 as usize,
-                end: false,
-            }),
-        })
-    }
-}
-
 impl Index {
     pub fn new(config: IndexConfig) -> Result<Self> {
         Ok(Self {
@@ -554,7 +560,7 @@ impl Index {
         self.database
             .lock_all_and_write(|database_write_transaction| {
                 f(&mut WriteTransaction {
-                    database_write_transaction,
+                    database_transaction: database_write_transaction,
                 })
             })?;
 
@@ -568,7 +574,7 @@ impl Index {
         self.database
             .lock_all_writes_and_read(|database_read_transaction| {
                 f(ReadTransaction {
-                    database_read_transaction,
+                    database_transaction: database_read_transaction,
                 })
             })?;
         Ok(self)
