@@ -763,7 +763,38 @@ mod tests {
                         .collect::<Vec<_>>()?,
                     [o2.get_id(), o1.get_id()]
                 );
+                assert_eq!(
+                    transaction
+                        .search(&vec![b.clone()], &vec![], None)?
+                        .collect::<Vec<_>>()?,
+                    [o3.get_id(), o2.get_id()]
+                );
+                assert_eq!(
+                    transaction
+                        .search(&vec![c.clone()], &vec![], None)?
+                        .collect::<Vec<_>>()?,
+                    []
+                );
 
+                transaction.remove_object(&o2)?;
+                assert_eq!(
+                    transaction
+                        .search(&vec![a.clone()], &vec![], None)?
+                        .collect::<Vec<_>>()?,
+                    [o1.get_id()]
+                );
+                assert_eq!(
+                    transaction
+                        .search(&vec![b.clone()], &vec![], None)?
+                        .collect::<Vec<_>>()?,
+                    [o3.get_id()]
+                );
+                assert_eq!(
+                    transaction
+                        .search(&vec![c.clone()], &vec![], None)?
+                        .collect::<Vec<_>>()?,
+                    []
+                );
                 Ok(())
             })
             .unwrap();
