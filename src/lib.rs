@@ -5,7 +5,7 @@ use xxhash_rust::xxh3::xxh3_128;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use std::ops::Deref;
+use std::{collections::HashSet, ops::Deref};
 
 #[derive(
     Clone, Default, PartialEq, PartialOrd, Debug, bincode::Encode, bincode::Decode, Eq, Ord, Hash,
@@ -184,8 +184,12 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
                 .id_to_source
                 .insert(object_id.clone(), raw.clone());
         }
+        let existent_tags = HashSet::<Id>::from_iter(self.get_tags(object)?.into_iter());
         for tag in tags {
             let tag_id = tag.get_id();
+            if existent_tags.contains(&tag_id) {
+                continue;
+            }
             self.database_transaction
                 .tag_and_object
                 .insert((tag_id.clone(), object_id.clone()), ());
@@ -212,7 +216,7 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
             .object_to_tags_count
             .get(&object_id)?
             .unwrap_or(0 as u32)
-            + 1;
+            + tags.len() as u32;
         self.database_transaction
             .object_to_tags_count
             .insert(object_id.clone(), current_object_tags_count);
@@ -318,6 +322,7 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
             .object_to_tags_count
             .get(&object_id)?
             .ok_or(anyhow!("No tags count record for object {object:?}"))?;
+        dbg!(&object_tags_count_before_delete);
         if tags_removed_from_object == object_tags_count_before_delete {
             self.database_transaction
                 .object_to_tags_count
@@ -347,7 +352,7 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
             .is_some())
     }
 
-    pub fn get_tags(&self, object: Object) -> Result<Vec<Id>> {
+    pub fn get_tags(&self, object: &Object) -> Result<Vec<Id>> {
         let object_id = object.get_id();
         self.database_transaction
             .object_and_tag
@@ -708,12 +713,6 @@ mod tests {
                     .unwrap()
                     .insert(&o3, &vec![a.clone(), b.clone(), c.clone()])
                     .unwrap();
-                // transaction.database_write_transaction.commit()?;
-                Ok(())
-            })
-            .unwrap();
-        index
-            .lock_all_writes_and_read(|transaction| {
                 assert_eq!(
                     transaction
                         .search(&vec![a.clone(), b.clone(), c.clone()], &vec![], None)?
@@ -770,6 +769,9 @@ mod tests {
                         .collect::<Vec<_>>()?,
                     [o2.get_id(), o1.get_id()]
                 );
+
+                transaction.remove_tags_from_object(&o3, &vec![a.clone(), c.clone()])?;
+
                 Ok(())
             })
             .unwrap();
