@@ -185,6 +185,7 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
                 .insert(object_id.clone(), raw.clone());
         }
         let existent_tags = HashSet::<Id>::from_iter(self.get_tags(object)?.into_iter());
+        let mut tags_added = 0 as u32;
         for tag in tags {
             let tag_id = tag.get_id();
             if existent_tags.contains(&tag_id) {
@@ -210,13 +211,14 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
             self.database_transaction
                 .tag_to_objects_count
                 .insert(tag_id.clone(), current_tag_objects_count);
+            tags_added += 1;
         }
         let current_object_tags_count = self
             .database_transaction
             .object_to_tags_count
             .get(&object_id)?
             .unwrap_or(0 as u32)
-            + tags.len() as u32;
+            + tags_added as u32;
         self.database_transaction
             .object_to_tags_count
             .insert(object_id.clone(), current_object_tags_count);
