@@ -202,7 +202,7 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
                     .id_to_source
                     .insert(tag_id.clone(), raw.clone());
             }
-            let current_tag_objects_count = self
+            let new_tag_objects_count = self
                 .database_transaction
                 .tag_to_objects_count
                 .get(&tag_id)?
@@ -210,18 +210,12 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
                 + 1;
             self.database_transaction
                 .tag_to_objects_count
-                .insert(tag_id.clone(), current_tag_objects_count);
+                .insert(tag_id.clone(), new_tag_objects_count);
             tags_added += 1;
         }
-        let current_object_tags_count = self
-            .database_transaction
-            .object_to_tags_count
-            .get(&object_id)?
-            .unwrap_or(0 as u32)
-            + tags_added as u32;
         self.database_transaction
             .object_to_tags_count
-            .insert(object_id.clone(), current_object_tags_count);
+            .insert(object_id.clone(), existent_tags.len() as u32 + tags_added);
         Ok(self)
     }
 
@@ -251,7 +245,7 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
             self.database_transaction
                 .object_and_tag
                 .remove(&(current_object_id, current_tag_id.clone()));
-            let current_tag_objects_count = self
+            let new_tag_objects_count = self
                 .database_transaction
                 .tag_to_objects_count
                 .get(&current_tag_id)?
@@ -259,7 +253,7 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
                 - 1;
             self.database_transaction
                 .tag_to_objects_count
-                .insert(current_tag_id, current_tag_objects_count);
+                .insert(current_tag_id, new_tag_objects_count);
         }
         self.database_transaction
             .object_to_tags_count
@@ -282,15 +276,11 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
         {
             return Ok(self);
         }
+        let tags_before_remove = HashSet::<Id>::from_iter(self.get_tags(object)?.into_iter());
         let mut tags_removed_from_object: u32 = 0;
         for tag in tags {
             let tag_id = tag.get_id();
-            if self
-                .database_transaction
-                .tag_and_object
-                .get(&(tag_id.clone(), object_id.clone()))?
-                .is_none()
-            {
+            if !tags_before_remove.contains(&tag_id) {
                 continue;
             }
             self.database_transaction
@@ -299,16 +289,16 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
             self.database_transaction
                 .object_and_tag
                 .remove(&(object_id.clone(), tag_id.clone()));
-            let new_tag_count = self
+            let new_tag_objects_count = self
                 .database_transaction
                 .tag_to_objects_count
                 .get(&tag_id)?
                 .ok_or(anyhow!("No objects count record for tag {tag:?}"))?
                 - 1;
-            if new_tag_count > 0 {
+            if new_tag_objects_count > 0 {
                 self.database_transaction
                     .tag_to_objects_count
-                    .insert(tag_id.clone(), new_tag_count.clone());
+                    .insert(tag_id.clone(), new_tag_objects_count.clone());
             } else {
                 self.database_transaction
                     .tag_to_objects_count
@@ -319,13 +309,7 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
             }
             tags_removed_from_object += 1;
         }
-        let object_tags_count_before_delete = self
-            .database_transaction
-            .object_to_tags_count
-            .get(&object_id)?
-            .ok_or(anyhow!("No tags count record for object {object:?}"))?;
-        dbg!(&object_tags_count_before_delete);
-        if tags_removed_from_object == object_tags_count_before_delete {
+        if tags_removed_from_object == tags_before_remove.len() as u32 {
             self.database_transaction
                 .object_to_tags_count
                 .remove(&object_id);
@@ -335,7 +319,7 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
         } else {
             self.database_transaction.object_to_tags_count.insert(
                 object_id.clone(),
-                object_tags_count_before_delete - tags_removed_from_object,
+                tags_before_remove.len() as u32 - tags_removed_from_object,
             );
         }
 
@@ -773,6 +757,12 @@ mod tests {
                 );
 
                 transaction.remove_tags_from_object(&o3, &vec![a.clone(), c.clone()])?;
+                assert_eq!(
+                    transaction
+                        .search(&vec![a.clone()], &vec![], None)?
+                        .collect::<Vec<_>>()?,
+                    [o2.get_id(), o1.get_id()]
+                );
 
                 Ok(())
             })
