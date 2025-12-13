@@ -402,30 +402,12 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
         loop {
             if self.cursors.len() == self.present_tags_ids.len() {
                 let first_cursor_object = self.cursors[0].current_value.clone().unwrap().1;
-                // dbg!(&first_cursor_object);
-                // dbg!(
-                //     self.cursors
-                //         .iter()
-                //         .map(|cursor| cursor.current_value.clone().unwrap().1)
-                //         .collect::<Vec<_>>()
-                // );
-                // dbg!(
-                //     self.cursors
-                //         .iter()
-                //         .map(|cursor| self
-                //             .database_transaction
-                //             .id_to_source
-                //             .get(&cursor.current_value.clone().unwrap().1)
-                //             .unwrap())
-                //         .collect::<Vec<_>>()
-                // );
                 if self.cursors.iter().all(|cursor| {
                     cursor
                         .current_value
                         .clone()
                         .is_some_and(|current_value| current_value.1 == first_cursor_object)
                 }) {
-                    // println!("all equal");
                     let result = if fallible_iterator::convert(
                         self.absent_tags_ids
                             .iter()
@@ -450,7 +432,6 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
                             first_cursor_value.0 == self.present_tags_ids[0]
                         })
                     {
-                        // println!("1");
                         self.end = true;
                     }
                     return Ok(result);
@@ -486,7 +467,6 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
                     })
                 {
                     self.end = true;
-                    // println!("2");
                     return Ok(None);
                 }
                 self.cursors.push(cursor);
@@ -515,7 +495,6 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
                     })
                 {
                     self.end = true;
-                    // println!("3");
                     return Ok(None);
                 }
                 self.cursors.push(cursor);
@@ -533,7 +512,6 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
                     })
                 {
                     self.end = true;
-                    // println!("4");
                     return Ok(None);
                 }
             }
@@ -553,7 +531,6 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
                         .is_some_and(|current_value| current_value.0 == self.present_tags_ids[0])
                     {
                         self.end = true;
-                        // println!("5");
                         return Ok(None);
                     }
                 }
@@ -911,7 +888,6 @@ mod tests {
                 for _ in 0..SEARCHES_COUNT {
                     rng.shuffle(&mut tags);
                     let present_tags = tags.iter().take(2).cloned().collect::<Vec<_>>();
-                    dbg!(&tag_to_objects, &present_tags);
                     let result = BTreeSet::from_iter(
                         transaction
                             .search(&present_tags, &vec![], None)?
