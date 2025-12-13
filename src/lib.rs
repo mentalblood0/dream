@@ -837,7 +837,7 @@ mod tests {
     fn test_generative() {
         const TOTAL_TAGS_COUNT: usize = 8;
         const OBJECT_TAGS_COUNT: usize = 3;
-        const OBJECTS_COUNT: usize = 3;
+        const OBJECTS_COUNT: usize = 100;
         const SEARCHES_COUNT: usize = 100;
 
         let mut index = new_default_index("test_generative");
@@ -898,13 +898,13 @@ mod tests {
             .lock_all_writes_and_read(|transaction| {
                 for (tag, objects) in tag_to_objects.iter() {
                     assert_eq!(
-                        &transaction
+                        transaction
                             .search(&vec![tag.clone()], &vec![], None)?
                             .map(|object_id| transaction
                                 .get_source(&object_id)?
                                 .ok_or(anyhow!("No source for object id {object_id:?} found")))
-                            .collect::<Vec<_>>()?,
-                        objects
+                            .collect::<BTreeSet<_>>()?,
+                        BTreeSet::from_iter(objects.iter().cloned())
                     );
                 }
 
