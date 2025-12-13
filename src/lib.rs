@@ -14,7 +14,7 @@ pub struct Id {
     pub value: [u8; 16],
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Object {
     Raw(Vec<u8>),
     Identified(Id),
@@ -58,8 +58,34 @@ pub struct WriteTransaction<'a, 'b> {
     database_transaction: &'a mut dream_database::WriteTransaction<'b>,
 }
 
-macro_rules! define_search_fn {
+macro_rules! define_read_methods {
     () => {
+        pub fn get_source(&self, id: &Id) -> Result<Option<Object>> {
+            Ok(self
+                .database_transaction
+                .id_to_source
+                .get(id)?
+                .and_then(|value| Some(Object::Raw(value))))
+        }
+
+        pub fn has_tag(&self, object: &Object, tag: &Object) -> Result<bool> {
+            Ok(self
+                .database_transaction
+                .object_and_tag
+                .get(&(object.get_id(), tag.get_id()))?
+                .is_some())
+        }
+
+        pub fn get_tags(&self, object: &Object) -> Result<Vec<Id>> {
+            let object_id = object.get_id();
+            self.database_transaction
+                .object_and_tag
+                .iter(Some(&(object_id.clone(), Id::default())))?
+                .take_while(|((current_object_id, _), _)| Ok(current_object_id == &object_id))
+                .map(|((_, current_tag_id), _)| Ok(current_tag_id))
+                .collect::<Vec<_>>()
+        }
+
         pub fn search(
             &self,
             present_tags: &Vec<Object>,
@@ -171,11 +197,11 @@ macro_rules! define_search_fn {
 }
 
 impl<'a> ReadTransaction<'a> {
-    define_search_fn!();
+    define_read_methods!();
 }
 
 impl<'a, 'b> WriteTransaction<'a, 'b> {
-    define_search_fn!();
+    define_read_methods!();
 
     pub fn insert(&mut self, object: &Object, tags: &Vec<Object>) -> Result<&mut Self> {
         let object_id = object.get_id();
@@ -197,7 +223,7 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
             self.database_transaction
                 .object_and_tag
                 .insert((object_id.clone(), tag_id.clone()), ());
-            if let Object::Raw(raw) = object {
+            if let Object::Raw(raw) = tag {
                 self.database_transaction
                     .id_to_source
                     .insert(tag_id.clone(), raw.clone());
@@ -325,28 +351,6 @@ impl<'a, 'b> WriteTransaction<'a, 'b> {
 
         Ok(self)
     }
-
-    pub fn get_source(&self, id: &Id) -> Result<Option<Vec<u8>>> {
-        self.database_transaction.id_to_source.get(id)
-    }
-
-    pub fn has_tag(&self, object: &Object, tag: &Object) -> Result<bool> {
-        Ok(self
-            .database_transaction
-            .object_and_tag
-            .get(&(object.get_id(), tag.get_id()))?
-            .is_some())
-    }
-
-    pub fn get_tags(&self, object: &Object) -> Result<Vec<Id>> {
-        let object_id = object.get_id();
-        self.database_transaction
-            .object_and_tag
-            .iter(Some(&(object_id.clone(), Id::default())))?
-            .take_while(|((current_object_id, _), _)| Ok(current_object_id == &object_id))
-            .map(|((_, current_tag_id), _)| Ok(current_tag_id))
-            .collect::<Vec<_>>()
-    }
 }
 
 struct Cursor<'a> {
@@ -398,12 +402,30 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
         loop {
             if self.cursors.len() == self.present_tags_ids.len() {
                 let first_cursor_object = self.cursors[0].current_value.clone().unwrap().1;
+                // dbg!(&first_cursor_object);
+                // dbg!(
+                //     self.cursors
+                //         .iter()
+                //         .map(|cursor| cursor.current_value.clone().unwrap().1)
+                //         .collect::<Vec<_>>()
+                // );
+                // dbg!(
+                //     self.cursors
+                //         .iter()
+                //         .map(|cursor| self
+                //             .database_transaction
+                //             .id_to_source
+                //             .get(&cursor.current_value.clone().unwrap().1)
+                //             .unwrap())
+                //         .collect::<Vec<_>>()
+                // );
                 if self.cursors.iter().all(|cursor| {
                     cursor
                         .current_value
                         .clone()
                         .is_some_and(|current_value| current_value.1 == first_cursor_object)
                 }) {
+                    // println!("all equal");
                     let result = if fallible_iterator::convert(
                         self.absent_tags_ids
                             .iter()
@@ -428,6 +450,7 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
                             first_cursor_value.0 == self.present_tags_ids[0]
                         })
                     {
+                        // println!("1");
                         self.end = true;
                     }
                     return Ok(result);
@@ -463,6 +486,7 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
                     })
                 {
                     self.end = true;
+                    // println!("2");
                     return Ok(None);
                 }
                 self.cursors.push(cursor);
@@ -491,6 +515,7 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
                     })
                 {
                     self.end = true;
+                    // println!("3");
                     return Ok(None);
                 }
                 self.cursors.push(cursor);
@@ -508,6 +533,7 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
                     })
                 {
                     self.end = true;
+                    // println!("4");
                     return Ok(None);
                 }
             }
@@ -527,6 +553,7 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
                         .is_some_and(|current_value| current_value.0 == self.present_tags_ids[0])
                     {
                         self.end = true;
+                        // println!("5");
                         return Ok(None);
                     }
                 }
@@ -544,9 +571,9 @@ impl Index {
         })
     }
 
-    pub fn lock_all_and_write<'a, F>(&'a mut self, f: F) -> Result<&'a mut Self>
+    pub fn lock_all_and_write<'a, F>(&'a mut self, mut f: F) -> Result<&'a mut Self>
     where
-        F: Fn(&mut WriteTransaction<'_, '_>) -> Result<()>,
+        F: FnMut(&mut WriteTransaction<'_, '_>) -> Result<()>,
     {
         self.database
             .lock_all_and_write(|database_write_transaction| {
@@ -558,9 +585,9 @@ impl Index {
         Ok(self)
     }
 
-    pub fn lock_all_writes_and_read<F>(&self, f: F) -> Result<&Self>
+    pub fn lock_all_writes_and_read<F>(&self, mut f: F) -> Result<&Self>
     where
-        F: Fn(ReadTransaction) -> Result<()>,
+        F: FnMut(ReadTransaction) -> Result<()>,
     {
         self.database
             .lock_all_writes_and_read(|database_read_transaction| {
@@ -576,7 +603,13 @@ impl Index {
 mod tests {
     use super::*;
 
-    use std::path::Path;
+    use std::{
+        collections::{BTreeMap, BTreeSet},
+        path::Path,
+    };
+
+    use nanorand::{Rng, WyRand};
+    use pretty_assertions::assert_eq;
 
     fn new_default_index(test_name_for_isolation: &str) -> Index {
         let database_dir =
@@ -795,6 +828,111 @@ mod tests {
                         .collect::<Vec<_>>()?,
                     []
                 );
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_generative() {
+        const TOTAL_TAGS_COUNT: usize = 8;
+        const OBJECT_TAGS_COUNT: usize = 3;
+        const OBJECTS_COUNT: usize = 3;
+        const SEARCHES_COUNT: usize = 100;
+
+        let mut index = new_default_index("test_generative");
+        let mut rng = WyRand::new_seed(0);
+
+        let mut tags = (0..TOTAL_TAGS_COUNT)
+            .map(|_| {
+                let mut tag = vec![0u8; 16];
+                rng.fill(&mut tag);
+                Object::Raw(tag)
+            })
+            .collect::<Vec<_>>();
+        let object_to_tags = (0..OBJECTS_COUNT)
+            .map(|_| {
+                let mut object_value = vec![0u8; 16];
+                rng.fill(&mut object_value);
+                let mut tags = (0..OBJECT_TAGS_COUNT)
+                    .map(|_| tags[rng.generate_range(0..tags.len())].clone())
+                    .collect::<Vec<_>>();
+                tags.sort();
+                tags.dedup();
+                (Object::Raw(object_value), tags)
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        index
+            .lock_all_and_write(|transaction| {
+                for (object, tags) in object_to_tags.iter() {
+                    transaction.insert(&object, &tags)?;
+                }
+                for (object, tags) in object_to_tags.iter() {
+                    for tag in tags.iter() {
+                        assert_eq!(transaction.has_tag(object, tag)?, true);
+                    }
+                    let result_tags = BTreeSet::from_iter(
+                        transaction
+                            .get_tags(object)?
+                            .iter()
+                            .map(|tag_id| transaction.get_source(tag_id).unwrap().unwrap()),
+                    );
+                    let correct_tags = BTreeSet::from_iter(tags.iter().cloned());
+                    assert_eq!(result_tags, correct_tags);
+                }
+                Ok(())
+            })
+            .unwrap();
+
+        let tag_to_objects = {
+            let mut result: BTreeMap<Object, Vec<Object>> = BTreeMap::new();
+            object_to_tags.iter().for_each(|(object, tags)| {
+                tags.iter().for_each(|tag| {
+                    (*result.entry(tag.clone()).or_insert(vec![])).push(object.clone());
+                })
+            });
+            result
+        };
+        index
+            .lock_all_writes_and_read(|transaction| {
+                for (tag, objects) in tag_to_objects.iter() {
+                    assert_eq!(
+                        &transaction
+                            .search(&vec![tag.clone()], &vec![], None)?
+                            .map(|object_id| transaction
+                                .get_source(&object_id)?
+                                .ok_or(anyhow!("No source for object id {object_id:?} found")))
+                            .collect::<Vec<_>>()?,
+                        objects
+                    );
+                }
+
+                for _ in 0..SEARCHES_COUNT {
+                    rng.shuffle(&mut tags);
+                    let present_tags = tags.iter().take(2).cloned().collect::<Vec<_>>();
+                    dbg!(&tag_to_objects, &present_tags);
+                    let result = BTreeSet::from_iter(
+                        transaction
+                            .search(&present_tags, &vec![], None)?
+                            .collect::<Vec<_>>()?
+                            .iter()
+                            .map(|object_id| transaction.get_source(object_id).unwrap().unwrap()),
+                    );
+                    let correct = present_tags
+                        .iter()
+                        .map(|tag| {
+                            BTreeSet::from_iter(tag_to_objects.get(tag).unwrap_or(&vec![]).clone())
+                        })
+                        .reduce(|accumulator, current| {
+                            accumulator
+                                .intersection(&current)
+                                .cloned()
+                                .collect::<BTreeSet<_>>()
+                        })
+                        .unwrap_or_default();
+                    assert_eq!(result, correct);
+                }
                 Ok(())
             })
             .unwrap();
