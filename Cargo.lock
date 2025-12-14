@@ -434,7 +434,7 @@ dependencies = [
 [[package]]
 name = "lawn"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/lawn#bfa63c581992e87939fd0271de6defd1e8babe3d"
+source = "git+https://github.com/mentalblood0/lawn#56ba639bd9bc0b560fe17394ef52f488562bef0a"
 dependencies = [
  "anyhow",
  "bincode",
@@ -442,7 +442,6 @@ dependencies = [
  "parking_lot",
  "serde",
  "serde-saphyr",
- "typetag",
 ]
 
 [[package]]
