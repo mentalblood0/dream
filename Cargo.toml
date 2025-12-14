@@ -18,7 +18,7 @@ serde = ["lawn/serde", "dep:serde", "dep:serde-saphyr", "dep:typetag"]
 
 [dev-dependencies]
 nanorand = "0.8"
-criterion = { version = "0.8" }
+criterion = { version = "0.8", features = ["html_reports"] }
 pretty_assertions = "1.4"
 serde = { version = "1.0", features = ["derive"] }
 serde-saphyr = { git = "https://github.com/bourumir-wyngs/serde-saphyr" }
