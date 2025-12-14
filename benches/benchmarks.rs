@@ -136,6 +136,9 @@ fn criterion_benchmark(c: &mut Criterion) {
             }
             Ok(())
         })
+        .unwrap()
+        .database
+        .lock_all_and_checkpoint()
         .unwrap();
 
     for search_tags_count in 1..=4 {

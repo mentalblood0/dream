@@ -47,7 +47,7 @@ pub struct IndexConfig {
 }
 
 pub struct Index {
-    database: dream_database::Database,
+    pub database: dream_database::Database,
 }
 
 pub struct ReadTransaction<'a> {
