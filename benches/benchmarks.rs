@@ -1,111 +1,10 @@
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use fallible_iterator::FallibleIterator;
-use nanorand::{Rng, WyRand};
-use std::path::Path;
+use nanorand::{BufferedRng, Rng, WyRand};
+use std::{fs, io::BufReader, path::Path};
 
 extern crate dream;
 use dream::*;
-
-fn new_default_index(test_name_for_isolation: &str) -> Index {
-    let database_dir =
-        Path::new(format!("/tmp/dream/benchmark/{test_name_for_isolation}").as_str()).to_path_buf();
-
-    Index::new(IndexConfig {
-        database: dream_database::DatabaseConfig {
-            tables: dream_database::TablesConfig {
-                tag_and_object: lawn::table::TableConfig {
-                    index: lawn::index::IndexConfig {
-                        path: database_dir
-                            .join("tables")
-                            .join("tag_and_object")
-                            .join("index.idx")
-                            .to_path_buf(),
-                    },
-                    data_pool: Box::new(lawn::fixed_data_pool::FixedDataPoolConfig {
-                        path: database_dir
-                            .join("tables")
-                            .join("tag_and_object")
-                            .join("data.dat")
-                            .to_path_buf(),
-                        container_size: 32,
-                    }),
-                },
-                object_and_tag: lawn::table::TableConfig {
-                    index: lawn::index::IndexConfig {
-                        path: database_dir
-                            .join("tables")
-                            .join("object_and_tag")
-                            .join("index.idx")
-                            .to_path_buf(),
-                    },
-                    data_pool: Box::new(lawn::fixed_data_pool::FixedDataPoolConfig {
-                        path: database_dir
-                            .join("tables")
-                            .join("object_and_tag")
-                            .join("data.dat")
-                            .to_path_buf(),
-                        container_size: 32,
-                    }),
-                },
-                id_to_source: lawn::table::TableConfig {
-                    index: lawn::index::IndexConfig {
-                        path: database_dir
-                            .join("tables")
-                            .join("id_to_source")
-                            .join("index.idx")
-                            .to_path_buf(),
-                    },
-                    data_pool: Box::new(lawn::variable_data_pool::VariableDataPoolConfig {
-                        directory: database_dir
-                            .join("tables")
-                            .join("id_to_source")
-                            .join("data")
-                            .to_path_buf(),
-                        max_element_size: 65536 as usize,
-                    }),
-                },
-                tag_to_objects_count: lawn::table::TableConfig {
-                    index: lawn::index::IndexConfig {
-                        path: database_dir
-                            .join("tables")
-                            .join("tag_to_objects_count")
-                            .join("index.idx")
-                            .to_path_buf(),
-                    },
-                    data_pool: Box::new(lawn::fixed_data_pool::FixedDataPoolConfig {
-                        path: database_dir
-                            .join("tables")
-                            .join("tag_to_objects_count")
-                            .join("data.dat")
-                            .to_path_buf(),
-                        container_size: 20,
-                    }),
-                },
-                object_to_tags_count: lawn::table::TableConfig {
-                    index: lawn::index::IndexConfig {
-                        path: database_dir
-                            .join("tables")
-                            .join("object_to_tags_count")
-                            .join("index.idx")
-                            .to_path_buf(),
-                    },
-                    data_pool: Box::new(lawn::fixed_data_pool::FixedDataPoolConfig {
-                        path: database_dir
-                            .join("tables")
-                            .join("object_to_tags_count")
-                            .join("data.dat")
-                            .to_path_buf(),
-                        container_size: 20,
-                    }),
-                },
-            },
-            log: dream_database::LogConfig {
-                path: database_dir.join("log.dat").to_path_buf(),
-            },
-        },
-    })
-    .unwrap()
-}
 
 fn criterion_benchmark(c: &mut Criterion) {
     const TOTAL_TAGS_COUNT: usize = 100;
@@ -113,7 +12,12 @@ fn criterion_benchmark(c: &mut Criterion) {
     const OBJECTS_COUNT: usize = 100000;
 
     let mut rng = WyRand::new_seed(0);
-    let mut index = new_default_index("benchmark");
+    let mut index = Index::new(
+        serde_saphyr::from_reader(BufReader::new(
+            fs::File::open("benches/index_config.yml").unwrap(),
+        ))
+        .unwrap(),
+    );
 
     let mut tags = (0..TOTAL_TAGS_COUNT)
         .map(|_| {

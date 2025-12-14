@@ -440,6 +440,9 @@ dependencies = [
  "bincode",
  "fallible-iterator",
  "parking_lot",
+ "serde",
+ "serde-saphyr",
+ "typetag",
 ]
 
 [[package]]
