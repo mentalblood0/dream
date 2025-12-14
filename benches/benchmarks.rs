@@ -1,7 +1,7 @@
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use fallible_iterator::FallibleIterator;
-use nanorand::{BufferedRng, Rng, WyRand};
-use std::{fs, io::BufReader, path::Path};
+use nanorand::{Rng, WyRand};
+use std::{fs, io::BufReader};
 
 extern crate dream;
 use dream::*;
@@ -17,7 +17,8 @@ fn criterion_benchmark(c: &mut Criterion) {
             fs::File::open("benches/index_config.yml").unwrap(),
         ))
         .unwrap(),
-    );
+    )
+    .unwrap();
 
     let mut tags = (0..TOTAL_TAGS_COUNT)
         .map(|_| {
