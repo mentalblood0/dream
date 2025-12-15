@@ -13,34 +13,34 @@ index:
         index:
           path: /home/mentalblood/dream/benchmark/tables/tag_and_object/index.idx
         data_pool:
-          Fixed:
+          fixed:
             path: /home/mentalblood/dream/benchmark/tables/tag_and_object/data.dat
             container_size: 32
       object_and_tag:
         index:
           path: /home/mentalblood/dream/benchmark/tables/object_and_tag/index.idx
         data_pool:
-          Fixed:
+          fixed:
             path: /home/mentalblood/dream/benchmark/tables/object_and_tag/data.dat
             container_size: 32
       id_to_source:
         index:
           path: /home/mentalblood/dream/benchmark/tables/id_to_source/index.idx
         data_pool:
-          Variable:
+          variable:
             directory: /home/mentalblood/dream/benchmark/tables/id_to_source/data
             max_element_size: 65536
       tag_to_objects_count:
         index:
           path: /home/mentalblood/dream/benchmark/tables/tag_to_objects_count/index.idx
         data_pool:
-          Fixed:
+          fixed:
             path: /home/mentalblood/dream/benchmark/tables/tag_to_objects_count/data.dat
             container_size: 20
       object_to_tags_count:
         index:
           path: /home/mentalblood/dream/benchmark/tables/object_to_tags_count/index.idx
         data_pool:
-          Fixed:
+          fixed:
             path: /home/mentalblood/dream/benchmark/tables/object_to_tags_count/data.dat
             container_size: 20
