@@ -1,3 +1,31 @@
+pub extern crate fallible_iterator;
+pub extern crate serde;
+pub extern crate xxhash_rust;
+
+#[derive(
+    Clone, Default, PartialEq, PartialOrd, Debug, bincode::Encode, bincode::Decode, Eq, Ord, Hash,
+)]
+pub struct Id {
+    pub value: [u8; 16],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Object {
+    Raw(Vec<u8>),
+    Identified(Id),
+}
+
+impl Object {
+    fn get_id(&self) -> Id {
+        match self {
+            Object::Raw(raw) => Id {
+                value: xxhash_rust::xxh3::xxh3_128(raw).to_le_bytes(),
+            },
+            Object::Identified(id) => id.clone(),
+        }
+    }
+}
+
 #[macro_export]
 macro_rules! define_index {
     ($index_name:ident {
@@ -5,7 +33,9 @@ macro_rules! define_index {
     } use {
         $($use_item:tt)*
     }) => {
-        lawn::database::define_database!($index_name {
+        #[allow(dead_code)]
+        mod $index_name {
+        lawn::database::define_database!(lawn_database {
             tag_and_object<(Id, Id), ()>,
             object_and_tag<(Id, Id), ()>,
             id_to_source<Id, Vec<u8>>,
@@ -13,57 +43,34 @@ macro_rules! define_index {
             object_to_tags_count<Id, u32>,
             $( $table_name<$key_type, $value_type> ),*
         } use {
-            use super::Id;
+            use $crate::Id;
             $($use_item)*
         });
 
-        use anyhow::{Error, Result, anyhow};
-        use fallible_iterator::FallibleIterator;
-        use xxhash_rust::xxh3::xxh3_128;
-
-        use serde::{Deserialize, Serialize};
-
         use std::{collections::HashSet, ops::Deref};
 
-        #[derive(
-            Clone, Default, PartialEq, PartialOrd, Debug, bincode::Encode, bincode::Decode, Eq, Ord, Hash,
-        )]
-        pub struct Id {
-            pub value: [u8; 16],
-        }
+        use anyhow::{Error, Result, anyhow};
+        use $crate::fallible_iterator::FallibleIterator;
+        use $crate::serde::{Deserialize, Serialize};
 
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-        pub enum Object {
-            Raw(Vec<u8>),
-            Identified(Id),
-        }
-
-        impl Object {
-            fn get_id(&self) -> Id {
-                match self {
-                    Object::Raw(raw) => Id {
-                        value: xxh3_128(raw).to_le_bytes(),
-                    },
-                    Object::Identified(id) => id.clone(),
-                }
-            }
-        }
+        use $crate::Object;
+        use $crate::Id;
 
         #[derive(Serialize, Deserialize)]
         pub struct IndexConfig {
-            pub database: $index_name::DatabaseConfig,
+            pub database: lawn_database::DatabaseConfig,
         }
 
         pub struct Index {
-            pub database: $index_name::Database,
+            pub database: lawn_database::Database,
         }
 
         pub struct ReadTransaction<'a> {
-            database_transaction: $index_name::ReadTransaction<'a>,
+            database_transaction: lawn_database::ReadTransaction<'a>,
         }
 
         pub struct WriteTransaction<'a, 'b> {
-            database_transaction: &'a mut $index_name::WriteTransaction<'b>,
+            database_transaction: &'a mut lawn_database::WriteTransaction<'b>,
         }
 
         macro_rules! define_read_methods {
@@ -389,7 +396,7 @@ macro_rules! define_index {
         }
 
         pub struct SearchIterator<'a> {
-            database_transaction: &'a $index_name::TablesTransactions,
+            database_transaction: &'a lawn_database::TablesTransactions,
             present_tags_ids: Vec<Id>,
             absent_tags_ids: Vec<Id>,
             start_after_object: Option<Id>,
@@ -552,7 +559,7 @@ macro_rules! define_index {
         impl Index {
             pub fn new(config: IndexConfig) -> Result<Self> {
                 Ok(Self {
-                    database: $index_name::Database::new(config.database)?,
+                    database: lawn_database::Database::new(config.database)?,
                 })
             }
 
@@ -583,10 +590,11 @@ macro_rules! define_index {
                 Ok(self)
             }
         }
+        }
     };
 }
 
-define_index!(trove_database {
+define_index!(test_index {
 } use {
 });
 
@@ -596,11 +604,13 @@ mod tests {
 
     use std::collections::{BTreeMap, BTreeSet};
 
+    use anyhow::anyhow;
+    use fallible_iterator::FallibleIterator;
     use nanorand::{Rng, WyRand};
     use pretty_assertions::assert_eq;
 
-    fn new_default_index(test_name_for_isolation: &str) -> Index {
-        Index::new(
+    fn new_default_index(test_name_for_isolation: &str) -> test_index::Index {
+        test_index::Index::new(
             serde_saphyr::from_str(
                 &std::fs::read_to_string("src/test_index_config.yml")
                     .unwrap()
