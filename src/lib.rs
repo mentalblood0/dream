@@ -16,7 +16,7 @@ pub enum Object {
 }
 
 impl Object {
-    fn get_id(&self) -> Id {
+    pub fn get_id(&self) -> Id {
         match self {
             Object::Raw(raw) => Id {
                 value: xxhash_rust::xxh3::xxh3_128(raw).to_le_bytes(),
