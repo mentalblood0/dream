@@ -1,8 +1,25 @@
+macro_rules! define_index {
+    ($index_name:ident {
+        $($table_name:ident<$key_type:ty, $value_type:ty>),* $(,)?
+    } use {
+        $($use_item:tt)*
+    }) => {
+        lawn::database::define_database!($index_name {
+            tag_and_object<(Id, Id), ()>,
+            object_and_tag<(Id, Id), ()>,
+            id_to_source<Id, Vec<u8>>,
+            tag_to_objects_count<Id, u32>,
+            object_to_tags_count<Id, u32>,
+            $( $table_name<$key_type, $value_type> ),*
+        } use {
+            use super::Id;
+            $($use_item)*
+        });
+
 use anyhow::{Error, Result, anyhow};
 use fallible_iterator::FallibleIterator;
 use xxhash_rust::xxh3::xxh3_128;
 
-#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use std::{collections::HashSet, ops::Deref};
@@ -31,31 +48,21 @@ impl Object {
     }
 }
 
-lawn::database::define_database!(dream_database {
-    tag_and_object<(Id, Id), ()>,
-    object_and_tag<(Id, Id), ()>,
-    id_to_source<Id, Vec<u8>>,
-    tag_to_objects_count<Id, u32>,
-    object_to_tags_count<Id, u32>
-} use {
-    use super::Id;
-});
-
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Serialize, Deserialize)]
 pub struct IndexConfig {
-    pub database: dream_database::DatabaseConfig,
+    pub database: $index_name::DatabaseConfig,
 }
 
 pub struct Index {
-    pub database: dream_database::Database,
+    pub database: $index_name::Database,
 }
 
 pub struct ReadTransaction<'a> {
-    database_transaction: dream_database::ReadTransaction<'a>,
+    database_transaction: $index_name::ReadTransaction<'a>,
 }
 
 pub struct WriteTransaction<'a, 'b> {
-    database_transaction: &'a mut dream_database::WriteTransaction<'b>,
+    database_transaction: &'a mut $index_name::WriteTransaction<'b>,
 }
 
 macro_rules! define_read_methods {
@@ -381,7 +388,7 @@ impl<'a> Cursor<'a> {
 }
 
 pub struct SearchIterator<'a> {
-    database_transaction: &'a dream_database::TablesTransactions,
+    database_transaction: &'a $index_name::TablesTransactions,
     present_tags_ids: Vec<Id>,
     absent_tags_ids: Vec<Id>,
     start_after_object: Option<Id>,
@@ -544,7 +551,7 @@ impl<'a> FallibleIterator for SearchIterator<'a> {
 impl Index {
     pub fn new(config: IndexConfig) -> Result<Self> {
         Ok(Self {
-            database: dream_database::Database::new(config.database)?,
+            database: $index_name::Database::new(config.database)?,
         })
     }
 
@@ -575,9 +582,14 @@ impl Index {
         Ok(self)
     }
 }
+    };
+}
+
+define_index!(trove_database {
+} use {
+});
 
 #[cfg(test)]
-#[cfg(feature = "serde")]
 mod tests {
     use super::*;
 

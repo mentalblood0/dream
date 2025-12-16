@@ -3,13 +3,12 @@ use fallible_iterator::FallibleIterator;
 use nanorand::{Rng, WyRand};
 use std::{fs, io::BufReader};
 
-#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 extern crate dream;
 use dream::*;
 
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Serialize, Deserialize)]
 struct Config {
     index: IndexConfig,
     rng_seed: u64,
@@ -20,7 +19,6 @@ struct Config {
     benchmark_on_disk: bool,
 }
 
-#[cfg(feature = "serde")]
 fn criterion_benchmark(bencher_context: &mut Criterion) {
     let config: Config = serde_saphyr::from_reader(BufReader::new(
         fs::File::open("benches/config.yml").unwrap(),
