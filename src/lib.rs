@@ -66,11 +66,11 @@ macro_rules! define_index {
         }
 
         pub struct ReadTransaction<'a> {
-            database_transaction: lawn_database::ReadTransaction<'a>,
+            pub database_transaction: lawn_database::ReadTransaction<'a>,
         }
 
         pub struct WriteTransaction<'a, 'b> {
-            database_transaction: &'a mut lawn_database::WriteTransaction<'b>,
+            pub database_transaction: &'a mut lawn_database::WriteTransaction<'b>,
         }
 
         macro_rules! define_read_methods {
