@@ -56,7 +56,7 @@ macro_rules! define_index {
         use $crate::Object;
         use $crate::Id;
 
-        #[derive(Serialize, Deserialize)]
+        #[derive(Serialize, Deserialize, Debug)]
         pub struct IndexConfig {
             pub database: lawn_database::DatabaseConfig,
         }
