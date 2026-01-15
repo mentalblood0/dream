@@ -1,3 +1,4 @@
+pub extern crate anyhow;
 pub extern crate fallible_iterator;
 pub extern crate serde;
 pub extern crate xxhash_rust;
@@ -49,7 +50,7 @@ macro_rules! define_index {
 
         use std::{collections::HashSet, ops::Deref};
 
-        use anyhow::{Error, Result, anyhow};
+        use $crate::anyhow::{Context, Result, Error, anyhow};
         use $crate::fallible_iterator::FallibleIterator;
         use $crate::serde::{Deserialize, Serialize};
 
@@ -79,23 +80,25 @@ macro_rules! define_index {
                     Ok(self
                         .database_transaction
                         .id_to_source
-                        .get(id)?
+                        .get(id).with_context(|| format!("Can not get source for id {id:?} from id_to_source table"))?
                         .and_then(|value| Some(Object::Raw(value))))
                 }
 
                 pub fn has_tag(&self, object: &Object, tag: &Object) -> Result<bool> {
+                    let key = &(object.get_id(), tag.get_id());
                     Ok(self
                         .database_transaction
                         .object_and_tag
-                        .get(&(object.get_id(), tag.get_id()))?
+                        .get(key).with_context(|| format!("Can not verify if key {key:?} exists in object_and_tag table"))?
                         .is_some())
                 }
 
                 pub fn get_tags(&self, object: &Object) -> Result<Vec<Id>> {
                     let object_id = object.get_id();
+                    let from_object_and_tag = Some(&(object_id.clone(), Id::default()));
                     self.database_transaction
                         .object_and_tag
-                        .iter(Some(&(object_id.clone(), Id::default())))?
+                        .iter(from_object_and_tag).with_context(|| format!("Can not initiate iteration over object_and_tag table starting from key {from_object_and_tag:?}"))?
                         .take_while(|((current_object_id, _), _)| Ok(current_object_id == &object_id))
                         .map(|((_, current_tag_id), _)| Ok(current_tag_id))
                         .collect::<Vec<_>>()
@@ -114,7 +117,7 @@ macro_rules! define_index {
                             if let Some(tag_objects_count) = self
                                 .database_transaction
                                 .tag_to_objects_count
-                                .get(&tag_id)?
+                                .get(&tag_id).with_context(|| format!("Can not get objects count for tag with id {tag_id:?} using tag_to_objects_count table"))?
                             {
                                 absent_tags_ids_and_objects_count.push((tag_id, tag_objects_count));
                             }
@@ -128,36 +131,41 @@ macro_rules! define_index {
                             .collect::<Vec<_>>()
                     };
                     Ok(match present_tags.len() {
-                        0 => Box::new(
-                            self.database_transaction
-                                .object_to_tags_count
-                                .iter(Some(&start_after_object.clone().unwrap_or_default()))?
-                                .skip(if start_after_object.is_some() { 1 } else { 0 })
-                                .map(|(object_id, _)| Ok(object_id))
-                                .filter(move |object_id| {
-                                    fallible_iterator::convert(
-                                        absent_tags_ids
-                                            .iter()
-                                            .map(|id| Result::<Id>::Ok(id.clone())),
-                                    )
-                                    .all(|absent_tag_id| {
-                                        Ok(self
-                                            .database_transaction
-                                            .tag_and_object
-                                            .get(&(absent_tag_id.clone(), object_id.clone()))?
-                                            .is_none())
-                                    })
-                                }),
-                        ),
+                        0 => {
+                            let from_object = Some(&start_after_object.clone().unwrap_or_default());
+                            Box::new(
+                                self.database_transaction
+                                    .object_to_tags_count
+                                    .iter(from_object).with_context(|| format!("Can not initiate iteration over object_to_tags_count table starting from key {from_object:?}"))?
+                                    .skip(if start_after_object.is_some() { 1 } else { 0 })
+                                    .map(|(object_id, _)| Ok(object_id))
+                                    .filter(move |object_id| {
+                                        fallible_iterator::convert(
+                                            absent_tags_ids
+                                                .iter()
+                                                .map(|id| Result::<Id>::Ok(id.clone())),
+                                        )
+                                        .all(|absent_tag_id| {
+                                            let key = &(absent_tag_id.clone(), object_id.clone());
+                                            Ok(self
+                                                .database_transaction
+                                                .tag_and_object
+                                                .get(key).with_context(|| format!("Can not verify if key {key:?} exists in tag_and_object table"))?
+                                                .is_none())
+                                        })
+                                    }),
+                            )
+                        },
                         1 => {
                             let search_tag_id = present_tags[0].get_id();
+                            let from_tag_and_object = Some(&(
+                                search_tag_id.clone(),
+                                start_after_object.clone().unwrap_or_default(),
+                            ));
                             Box::new(
                                 self.database_transaction
                                     .tag_and_object
-                                    .iter(Some(&(
-                                        search_tag_id.clone(),
-                                        start_after_object.clone().unwrap_or_default(),
-                                    )))?
+                                    .iter(from_tag_and_object).with_context(|| format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}"))?
                                     .skip(if start_after_object.is_some() { 1 } else { 0 })
                                     .map(|((tag_id, object_id), _)| Ok((tag_id, object_id)))
                                     .take_while(move |(tag_id, _)| Ok(tag_id == &search_tag_id))
@@ -169,10 +177,11 @@ macro_rules! define_index {
                                                 .map(|id| Result::<Id>::Ok(id.clone())),
                                         )
                                         .all(|absent_tag_id| {
+                                            let key = &(absent_tag_id.clone(), object_id.clone());
                                             Ok(self
                                                 .database_transaction
                                                 .tag_and_object
-                                                .get(&(absent_tag_id.clone(), object_id.clone()))?
+                                                .get(key).with_context(|| format!("Can not verify if key {key:?} exists in tag_and_object table"))?
                                                 .is_none())
                                         })
                                     }),
@@ -189,7 +198,7 @@ macro_rules! define_index {
                                         tag_id.clone(),
                                         self.database_transaction
                                             .tag_to_objects_count
-                                            .get(&tag_id)?
+                                            .get(&tag_id).with_context(|| format!("Can not get objects count for tag with id {tag_id:?} using tag_to_objects_count table"))?
                                             .unwrap_or(0 as u32),
                                     ));
                                 }
@@ -225,7 +234,7 @@ macro_rules! define_index {
                         .id_to_source
                         .insert(object_id.clone(), raw.clone());
                 }
-                let existent_tags = HashSet::<Id>::from_iter(self.get_tags(object)?.into_iter());
+                let existent_tags = HashSet::<Id>::from_iter(self.get_tags(object).with_context(|| format!("Can not get tags for object {object:?}"))?.into_iter());
                 let mut tags_added = 0 as u32;
                 for tag in tags {
                     let tag_id = tag.get_id();
@@ -246,7 +255,7 @@ macro_rules! define_index {
                     let new_tag_objects_count = self
                         .database_transaction
                         .tag_to_objects_count
-                        .get(&tag_id)?
+                        .get(&tag_id).with_context(|| format!("Can not get objects count for tag with id {tag_id:?} using tag_to_objects_count table"))?
                         .unwrap_or(0 as u32)
                         + 1;
                     self.database_transaction
@@ -265,7 +274,7 @@ macro_rules! define_index {
                 if self
                     .database_transaction
                     .object_to_tags_count
-                    .get(&object_id)?
+                    .get(&object_id).with_context(|| format!("Can not get tags count for object with id {object_id:?} using object_to_tags_count table"))?
                     .is_none()
                 {
                     return Ok(self);
@@ -273,12 +282,13 @@ macro_rules! define_index {
                 if let Object::Raw(_) = object {
                     self.database_transaction.id_to_source.remove(&object_id);
                 }
+                let from_object_and_tag = Some(&(object_id.clone(), Id::default()));
                 let object_and_tag_iterator = self
                     .database_transaction
                     .object_and_tag
-                    .iter(Some(&(object_id.clone(), Id::default())))?
+                    .iter(from_object_and_tag).with_context(|| format!("Can not initiate iteration over object_and_tag table starting from key {from_object_and_tag:?}"))?
                     .take_while(|((current_object_id, _), _)| Ok(current_object_id == &object_id))
-                    .collect::<Vec<_>>()?;
+                    .collect::<Vec<_>>().with_context(|| format!("Can not collect from iteration over object_and_tag table starting from key {from_object_and_tag:?} taking while object id is {object_id:?}"))?;
                 for ((current_object_id, current_tag_id), _) in object_and_tag_iterator {
                     self.database_transaction
                         .tag_and_object
@@ -289,7 +299,7 @@ macro_rules! define_index {
                     let new_tag_objects_count = self
                         .database_transaction
                         .tag_to_objects_count
-                        .get(&current_tag_id)?
+                        .get(&current_tag_id).with_context(|| format!("Can not get objects count for tag with id {current_tag_id:?} using tag_to_objects_count table"))?
                         .unwrap_or(0 as u32)
                         - 1;
                     self.database_transaction
@@ -312,12 +322,12 @@ macro_rules! define_index {
                 if self
                     .database_transaction
                     .object_to_tags_count
-                    .get(&object_id)?
+                    .get(&object_id).with_context(|| format!("Can not get tags count for object with id {object_id:?} using object_to_tags_count table"))?
                     .is_none()
                 {
                     return Ok(self);
                 }
-                let tags_before_remove = HashSet::<Id>::from_iter(self.get_tags(object)?.into_iter());
+                let tags_before_remove = HashSet::<Id>::from_iter(self.get_tags(object).with_context(|| format!("Can not get tags for object {object:?}"))?.into_iter());
                 let mut tags_removed_from_object: u32 = 0;
                 for tag in tags {
                     let tag_id = tag.get_id();
@@ -333,7 +343,7 @@ macro_rules! define_index {
                     let new_tag_objects_count = self
                         .database_transaction
                         .tag_to_objects_count
-                        .get(&tag_id)?
+                        .get(&tag_id).with_context(|| format!("Can not get objects count for tag with id {tag_id:?} using tag_to_objects_count table"))?
                         .ok_or(anyhow!("No objects count record for tag {tag:?}"))?
                         - 1;
                     if new_tag_objects_count > 0 {
@@ -378,7 +388,7 @@ macro_rules! define_index {
                 mut iterator: Box<dyn FallibleIterator<Item = ((Id, Id), ()), Error = Error> + 'a>,
             ) -> Result<Self> {
                 let current_value = iterator
-                    .next()?
+                    .next().with_context(|| "Can not get first value from iterator")?
                     .and_then(|(current_value, _)| Some(current_value));
                 Ok(Self {
                     iterator,
@@ -389,7 +399,7 @@ macro_rules! define_index {
             fn next(&mut self) -> Result<()> {
                 self.current_value = self
                     .iterator
-                    .next()?
+                    .next().with_context(|| format!("Can not get next value from iterator after value {:?}", self.current_value))?
                     .and_then(|(current_value, _)| Some(current_value));
                 Ok(())
             }
@@ -429,17 +439,18 @@ macro_rules! define_index {
                                     .map(|id| Result::<Id>::Ok(id.clone())),
                             )
                             .all(|tag_id| {
+                                let key = &(tag_id.clone(), first_cursor_object.clone());
                                 Ok(self
                                     .database_transaction
                                     .tag_and_object
-                                    .get(&(tag_id.clone(), first_cursor_object.clone()))?
+                                    .get(key).with_context(|| format!("Can not verify if key {key:?} exists in tag_and_object table"))?
                                     .is_none())
                             })? {
                                 Some(first_cursor_object)
                             } else {
                                 None
                             };
-                            self.cursors[0].next()?;
+                            self.cursors[0].next().with_context(|| format!("Can not get next value for first cursor after value {:?}", self.cursors[0].current_value))?;
                             if !self.cursors[0]
                                 .current_value
                                 .as_ref()
@@ -456,23 +467,24 @@ macro_rules! define_index {
                     if self.cursors.len() < self.present_tags_ids.len()
                         && self.cursors.len() <= self.index_1
                     {
+                        let from_tag_and_object = Some(&(
+                            self.present_tags_ids[self.index_1].clone(),
+                            if self.index_1 == 0 {
+                                self.start_after_object.clone().unwrap_or_default()
+                            } else {
+                                self.cursors
+                                    .last()
+                                    .unwrap()
+                                    .current_value
+                                    .clone()
+                                    .unwrap()
+                                    .1
+                            },
+                        ));
                         let mut cursor =
-                            Cursor::new(self.database_transaction.tag_and_object.iter(Some(&(
-                                self.present_tags_ids[self.index_1].clone(),
-                                if self.index_1 == 0 {
-                                    self.start_after_object.clone().unwrap_or_default()
-                                } else {
-                                    self.cursors
-                                        .last()
-                                        .unwrap()
-                                        .current_value
-                                        .clone()
-                                        .unwrap()
-                                        .1
-                                },
-                            )))?)?;
+                            Cursor::new(self.database_transaction.tag_and_object.iter(from_tag_and_object).with_context(|| format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}"))?)?;
                         if self.index_1 == 0 && self.start_after_object.is_some() {
-                            cursor.next()?;
+                            cursor.next().with_context(|| format!("Can not propagate newely created cursor further (even getting nothing) to skip current entry as start_after_object {:?} is provided", self.start_after_object))?;
                         }
                         if !cursor
                             .current_value
@@ -490,17 +502,18 @@ macro_rules! define_index {
                     if self.cursors.len() < self.present_tags_ids.len()
                         && self.cursors.len() <= self.index_2
                     {
+                        let from_tag_and_object = Some(&(
+                            self.present_tags_ids[self.index_2].clone(),
+                            self.cursors
+                                .last()
+                                .unwrap()
+                                .current_value
+                                .clone()
+                                .unwrap()
+                                .1,
+                        ));
                         let cursor = Cursor::new(
-                            self.database_transaction.tag_and_object.iter(Some(&(
-                                self.present_tags_ids[self.index_2].clone(),
-                                self.cursors
-                                    .last()
-                                    .unwrap()
-                                    .current_value
-                                    .clone()
-                                    .unwrap()
-                                    .1,
-                            )))?,
+                            self.database_transaction.tag_and_object.iter(from_tag_and_object).with_context(|| format!("Can not initiate iteration over tag_and_object table starting with key {from_tag_and_object:?}"))?,
                         )?;
                         if !cursor
                             .current_value
@@ -518,7 +531,7 @@ macro_rules! define_index {
                     while self.cursors[self.index_2].current_value.as_ref().unwrap().1
                         < self.cursors[self.index_1].current_value.as_ref().unwrap().1
                     {
-                        self.cursors[self.index_2].next()?;
+                        self.cursors[self.index_2].next().with_context(|| format!("Can not propagate {:?}-th cursor further", self.index_2 + 1))?;
                         if !self.cursors[self.index_2]
                             .current_value
                             .as_ref()
@@ -539,7 +552,7 @@ macro_rules! define_index {
                         while self.cursors[0].current_value.as_ref().unwrap().1
                             < self.cursors[self.index_2].current_value.as_ref().unwrap().1
                         {
-                            self.cursors[0].next()?;
+                            self.cursors[0].next().with_context(|| format!("Can not propagate first cursor further"))?;
                             if !self.cursors[0]
                                 .current_value
                                 .as_ref()
@@ -559,7 +572,7 @@ macro_rules! define_index {
         impl Index {
             pub fn new(config: IndexConfig) -> Result<Self> {
                 Ok(Self {
-                    database: lawn_database::Database::new(config.database)?,
+                    database: lawn_database::Database::new(config.database.clone()).with_context(|| format!("Can not create dream index using database config {:?}", config.database))?,
                 })
             }
 
@@ -572,7 +585,8 @@ macro_rules! define_index {
                         f(&mut WriteTransaction {
                             database_transaction: database_write_transaction,
                         })
-                    })?;
+                    }).with_context(|| "Can not lock lawn database and initiate write transaction")?;
+
 
                 Ok(self)
             }
@@ -586,7 +600,7 @@ macro_rules! define_index {
                         f(ReadTransaction {
                             database_transaction: database_read_transaction,
                         })
-                    })?;
+                    }).with_context(|| "Can not lock all write operations on lawn database and initiate read transaction")?;
                 Ok(self)
             }
         }
