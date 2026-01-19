@@ -49,6 +49,7 @@ macro_rules! define_index {
         });
 
         use std::{collections::HashSet, ops::Deref};
+        use std::ops::Bound;
 
         use $crate::anyhow::{Context, Result, Error, anyhow};
         use $crate::fallible_iterator::FallibleIterator;
@@ -95,10 +96,10 @@ macro_rules! define_index {
 
                 pub fn get_tags(&self, object: &Object) -> Result<Vec<Id>> {
                     let object_id = object.get_id();
-                    let from_object_and_tag = Some(&(object_id.clone(), Id::default()));
+                    let from_object_and_tag = &(object_id.clone(), Id::default());
                     self.database_transaction
                         .object_and_tag
-                        .iter(from_object_and_tag).with_context(|| format!("Can not initiate iteration over object_and_tag table starting from key {from_object_and_tag:?}"))?
+                        .iter(Bound::Included(from_object_and_tag), false).with_context(|| format!("Can not initiate iteration over object_and_tag table starting from key {from_object_and_tag:?}"))?
                         .take_while(|((current_object_id, _), _)| Ok(current_object_id == &object_id))
                         .map(|((_, current_tag_id), _)| Ok(current_tag_id))
                         .collect::<Vec<_>>()
@@ -132,11 +133,11 @@ macro_rules! define_index {
                     };
                     Ok(match present_tags.len() {
                         0 => {
-                            let from_object = Some(&start_after_object.clone().unwrap_or_default());
+                            let from_object = &start_after_object.clone().unwrap_or_default();
                             Box::new(
                                 self.database_transaction
                                     .object_to_tags_count
-                                    .iter(from_object).with_context(|| format!("Can not initiate iteration over object_to_tags_count table starting from key {from_object:?}"))?
+                                    .iter(Bound::Included(from_object), false).with_context(|| format!("Can not initiate iteration over object_to_tags_count table starting from key {from_object:?}"))?
                                     .skip(if start_after_object.is_some() { 1 } else { 0 })
                                     .map(|(object_id, _)| Ok(object_id))
                                     .filter(move |object_id| {
@@ -158,14 +159,14 @@ macro_rules! define_index {
                         },
                         1 => {
                             let search_tag_id = present_tags[0].get_id();
-                            let from_tag_and_object = Some(&(
+                            let from_tag_and_object = &(
                                 search_tag_id.clone(),
                                 start_after_object.clone().unwrap_or_default(),
-                            ));
+                            );
                             Box::new(
                                 self.database_transaction
                                     .tag_and_object
-                                    .iter(from_tag_and_object).with_context(|| format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}"))?
+                                    .iter(Bound::Included(from_tag_and_object), false).with_context(|| format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}"))?
                                     .skip(if start_after_object.is_some() { 1 } else { 0 })
                                     .map(|((tag_id, object_id), _)| Ok((tag_id, object_id)))
                                     .take_while(move |(tag_id, _)| Ok(tag_id == &search_tag_id))
@@ -282,11 +283,11 @@ macro_rules! define_index {
                 if let Object::Raw(_) = object {
                     self.database_transaction.id_to_source.remove(&object_id);
                 }
-                let from_object_and_tag = Some(&(object_id.clone(), Id::default()));
+                let from_object_and_tag = &(object_id.clone(), Id::default());
                 let object_and_tag_iterator = self
                     .database_transaction
                     .object_and_tag
-                    .iter(from_object_and_tag).with_context(|| format!("Can not initiate iteration over object_and_tag table starting from key {from_object_and_tag:?}"))?
+                    .iter(Bound::Included(from_object_and_tag), false).with_context(|| format!("Can not initiate iteration over object_and_tag table starting from key {from_object_and_tag:?}"))?
                     .take_while(|((current_object_id, _), _)| Ok(current_object_id == &object_id))
                     .collect::<Vec<_>>().with_context(|| format!("Can not collect from iteration over object_and_tag table starting from key {from_object_and_tag:?} taking while object id is {object_id:?}"))?;
                 for ((current_object_id, current_tag_id), _) in object_and_tag_iterator {
@@ -467,7 +468,7 @@ macro_rules! define_index {
                     if self.cursors.len() < self.present_tags_ids.len()
                         && self.cursors.len() <= self.index_1
                     {
-                        let from_tag_and_object = Some(&(
+                        let from_tag_and_object = &(
                             self.present_tags_ids[self.index_1].clone(),
                             if self.index_1 == 0 {
                                 self.start_after_object.clone().unwrap_or_default()
@@ -480,9 +481,9 @@ macro_rules! define_index {
                                     .unwrap()
                                     .1
                             },
-                        ));
+                        );
                         let mut cursor =
-                            Cursor::new(self.database_transaction.tag_and_object.iter(from_tag_and_object).with_context(|| format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}"))?)?;
+                            Cursor::new(self.database_transaction.tag_and_object.iter(Bound::Included(from_tag_and_object), false).with_context(|| format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}"))?)?;
                         if self.index_1 == 0 && self.start_after_object.is_some() {
                             cursor.next().with_context(|| format!("Can not propagate newely created cursor further (even getting nothing) to skip current entry as start_after_object {:?} is provided", self.start_after_object))?;
                         }
@@ -502,7 +503,7 @@ macro_rules! define_index {
                     if self.cursors.len() < self.present_tags_ids.len()
                         && self.cursors.len() <= self.index_2
                     {
-                        let from_tag_and_object = Some(&(
+                        let from_tag_and_object = &(
                             self.present_tags_ids[self.index_2].clone(),
                             self.cursors
                                 .last()
@@ -511,9 +512,9 @@ macro_rules! define_index {
                                 .clone()
                                 .unwrap()
                                 .1,
-                        ));
+                        );
                         let cursor = Cursor::new(
-                            self.database_transaction.tag_and_object.iter(from_tag_and_object).with_context(|| format!("Can not initiate iteration over tag_and_object table starting with key {from_tag_and_object:?}"))?,
+                            self.database_transaction.tag_and_object.iter(Bound::Included(from_tag_and_object), false).with_context(|| format!("Can not initiate iteration over tag_and_object table starting with key {from_tag_and_object:?}"))?,
                         )?;
                         if !cursor
                             .current_value
