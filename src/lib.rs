@@ -1,5 +1,6 @@
 pub extern crate anyhow;
 pub extern crate fallible_iterator;
+pub extern crate lawn;
 pub extern crate serde;
 pub extern crate xxhash_rust;
 
@@ -36,6 +37,7 @@ macro_rules! define_index {
     }) => {
         #[allow(dead_code)]
         mod $index_name {
+        use $crate::lawn;
         lawn::database::define_database!(lawn_database {
             tag_and_object<(Id, Id), ()>,
             object_and_tag<(Id, Id), ()>,
