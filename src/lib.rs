@@ -96,6 +96,17 @@ macro_rules! define_index {
                         .is_some())
                 }
 
+                pub fn has_object_with_tag(&self, tag: &Object) -> Result<bool> {
+                    let from_tag_and_object= &(tag.get_id(), Id {value: [0u8; 16]});
+                    Ok(self
+                        .database_transaction
+                        .tag_and_object
+                        .iter(Bound::Included(from_tag_and_object), false).with_context(|| format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}"))?
+                        .take_while(|((current_tag_id, _), _)| Ok(*current_tag_id == from_tag_and_object.0))
+                        .next()?
+                        .is_some())
+                }
+
                 pub fn get_tags(&self, object: &Object) -> Result<Vec<Id>> {
                     let object_id = object.get_id();
                     let from_object_and_tag = &(object_id.clone(), Id::default());
@@ -823,6 +834,10 @@ mod tests {
         index
             .lock_all_writes_and_read(|transaction| {
                 for (tag, objects) in tag_to_objects.iter() {
+                    for object in objects {
+                        assert_eq!(transaction.has_tag(object, tag)?, true);
+                        assert_eq!(transaction.has_object_with_tag(tag)?, true);
+                    }
                     assert_eq!(
                         transaction
                             .search(&vec![tag.clone()], &vec![], None)?
