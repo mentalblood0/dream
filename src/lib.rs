@@ -1,23 +1,67 @@
+//! A tagged object indexing library with support for efficient tag-based searches.
+//!
+//! This library provides an indexed storage system for objects with tags, enabling
+//! fast searches for objects that have certain tags and lack other tags. It uses
+//! [lawn](https://docs.rs/lawn) as the underlying database for persistence.
+//!
+//! # Key Features
+//!
+//! - **Tag-based indexing**: Objects can be tagged and searched by tag combinations
+//! - **Efficient searches**: Optimized query performance for common search patterns
+//! - **Persistence**: All data is persisted using the lawn database
+//! - **Transaction support**: Read and write transactions for safe concurrent access
+
 pub extern crate anyhow;
 pub extern crate fallible_iterator;
 pub extern crate lawn;
 pub extern crate serde;
 pub extern crate xxhash_rust;
 
+/// A 16-byte unique identifier for objects.
+///
+/// `Id` is used to uniquely identify objects and tags within the index.
+/// When an object is inserted without an explicit ID, its ID is computed
+/// as the xxh3-128 hash of the raw data.
 #[derive(
     Clone, Default, PartialEq, PartialOrd, Debug, bincode::Encode, bincode::Decode, Eq, Ord, Hash,
 )]
 pub struct Id {
+    /// The 16-byte identifier value.
     pub value: [u8; 16],
 }
 
+/// Represents an object that can be stored in the index.
+///
+/// An `Object` is either raw byte data or an already-identified object.
+/// When inserting raw data, the system automatically computes a unique
+/// ID based on the content hash. Objects with explicit IDs maintain
+/// that identity across operations.
+///
+/// # Variants
+///
+/// - `Raw(Vec<u8>)`: Raw byte data. An ID will be computed from the content.
+/// - `Identified(Id)`: An object with an explicitly assigned ID.
+///
+/// # Computing IDs
+///
+/// When using `Object::Raw`, the ID is computed using xxh3-128 hashing.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Object {
+    /// Raw byte data. An ID will be automatically computed from the content.
     Raw(Vec<u8>),
+    /// An object with an explicitly assigned ID.
     Identified(Id),
 }
 
 impl Object {
+    /// Gets the ID of this object.
+    ///
+    /// If the object is `Raw`, computes a new ID from the content hash.
+    /// If the object is `Identified`, returns the existing ID.
+    ///
+    /// # Returns
+    ///
+    /// The unique `Id` for this object.
     pub fn get_id(&self) -> Id {
         match self {
             Object::Raw(raw) => Id {
@@ -60,25 +104,53 @@ macro_rules! define_index {
         use $crate::Object;
         use $crate::Id;
 
+        /// Configuration for an index.
+        ///
+        /// Contains the database configuration and is serializable for persistence.
         #[derive(Serialize, Deserialize, Debug, Clone)]
         pub struct IndexConfig {
+            /// The underlying lawn database configuration.
             pub database: lawn_database::DatabaseConfig,
         }
 
+        /// The main index structure managing the database.
+        ///
+        /// Use `Index::new()` to create an instance and `lock_all_and_write()`
+        /// or `lock_all_writes_and_read()` to perform operations.
         pub struct Index {
+            /// The underlying lawn database.
             pub database: lawn_database::Database,
         }
 
+        /// A read-only transaction for querying the index.
+        ///
+        /// Created via `Index::lock_all_writes_and_read()`. Provides methods
+        /// for searching and retrieving objects and tags.
         pub struct ReadTransaction<'a> {
+            /// The underlying database read transaction.
             pub database_transaction: lawn_database::ReadTransaction<'a>,
         }
 
+        /// A write transaction for mutating the index.
+        ///
+        /// Created via `Index::lock_all_and_write()`. Provides methods for
+        /// inserting objects, removing objects, and managing tags.
         pub struct WriteTransaction<'a, 'b> {
+            /// The underlying database write transaction.
             pub database_transaction: &'a mut lawn_database::WriteTransaction<'b>,
         }
 
         macro_rules! define_read_methods {
             () => {
+                /// Retrieves the raw data for an object given its ID.
+                ///
+                /// # Arguments
+                ///
+                /// * `id` - The ID of the object to retrieve.
+                ///
+                /// # Returns
+                ///
+                /// `Ok(Some(Object::Raw(data)))` if found, `Ok(None)` if not found.
                 pub fn get_source(&self, id: &Id) -> Result<Option<Object>> {
                     Ok(self
                         .database_transaction
@@ -87,6 +159,16 @@ macro_rules! define_index {
                         .and_then(|value| Some(Object::Raw(value))))
                 }
 
+                /// Checks if an object has a specific tag.
+                ///
+                /// # Arguments
+                ///
+                /// * `object` - The object to check.
+                /// * `tag` - The tag to look for.
+                ///
+                /// # Returns
+                ///
+                /// `Ok(true)` if the object has the tag, `Ok(false)` otherwise.
                 pub fn has_tag(&self, object: &Object, tag: &Object) -> Result<bool> {
                     let key = &(object.get_id(), tag.get_id());
                     Ok(self
@@ -96,6 +178,15 @@ macro_rules! define_index {
                         .is_some())
                 }
 
+                /// Checks if any object has the given tag.
+                ///
+                /// # Arguments
+                ///
+                /// * `tag` - The tag to check for.
+                ///
+                /// # Returns
+                ///
+                /// `Ok(true)` if at least one object has the tag, `Ok(false)` otherwise.
                 pub fn has_object_with_tag(&self, tag: &Object) -> Result<bool> {
                     let from_tag_and_object= &(tag.get_id(), Id {value: [0u8; 16]});
                     Ok(self
@@ -107,6 +198,15 @@ macro_rules! define_index {
                         .is_some())
                 }
 
+                /// Gets all tags associated with an object.
+                ///
+                /// # Arguments
+                ///
+                /// * `object` - The object to get tags for.
+                ///
+                /// # Returns
+                ///
+                /// A vector of tag IDs associated with the object.
                 pub fn get_tags(&self, object: &Object) -> Result<Vec<Id>> {
                     let object_id = object.get_id();
                     let from_object_and_tag = &(object_id.clone(), Id::default());
@@ -118,6 +218,20 @@ macro_rules! define_index {
                         .collect::<Vec<_>>()
                 }
 
+                /// Searches for objects matching tag criteria.
+                ///
+                /// Returns an iterator of object IDs that have all `present_tags`
+                /// and none of the `absent_tags`.
+                ///
+                /// # Arguments
+                ///
+                /// * `present_tags` - Objects that must have all these tags.
+                /// * `absent_tags` - Objects must not have any of these tags.
+                /// * `start_after_object` - Optional ID to start searching after (for pagination).
+                ///
+                /// # Returns
+                ///
+                /// A fallible iterator yielding matching object IDs.
                 pub fn search(
                     &self,
                     present_tags: &Vec<Object>,
@@ -241,6 +355,19 @@ macro_rules! define_index {
         impl<'a, 'b> WriteTransaction<'a, 'b> {
             define_read_methods!();
 
+            /// Inserts an object with associated tags.
+            ///
+            /// If the object already exists, adds the new tags to it.
+            /// If the object is `Raw`, stores its raw data.
+            ///
+            /// # Arguments
+            ///
+            /// * `object` - The object to insert.
+            /// * `tags` - Tags to associate with the object.
+            ///
+            /// # Returns
+            ///
+            /// `Ok(self)` on success, allowing method chaining.
             pub fn insert(&mut self, object: &Object, tags: &Vec<Object>) -> Result<&mut Self> {
                 let object_id = object.get_id();
                 if let Object::Raw(raw) = object {
@@ -283,6 +410,18 @@ macro_rules! define_index {
                 Ok(self)
             }
 
+            /// Removes an object and all its associated data.
+            ///
+            /// Removes the object, its raw data (if Raw), and all tag associations.
+            /// Also updates the tag-to-object count for affected tags.
+            ///
+            /// # Arguments
+            ///
+            /// * `object` - The object to remove.
+            ///
+            /// # Returns
+            ///
+            /// `Ok(self)` on success.
             pub fn remove_object(&mut self, object: &Object) -> Result<&mut Self> {
                 let object_id = object.get_id();
                 if self
@@ -327,6 +466,19 @@ macro_rules! define_index {
                 Ok(self)
             }
 
+            /// Removes specific tags from an object.
+            ///
+            /// If all tags are removed from an object, the object itself is also removed.
+            /// Updates tag counts accordingly.
+            ///
+            /// # Arguments
+            ///
+            /// * `object` - The object to modify.
+            /// * `tags` - Tags to remove from the object.
+            ///
+            /// # Returns
+            ///
+            /// `Ok(self)` on success.
             pub fn remove_tags_from_object(
                 &mut self,
                 object: &Object,
@@ -584,12 +736,34 @@ macro_rules! define_index {
         }
 
         impl Index {
+            /// Creates a new index from configuration.
+            ///
+            /// # Arguments
+            ///
+            /// * `config` - The index configuration.
+            ///
+            /// # Returns
+            ///
+            /// `Ok(Index)` on success.
             pub fn new(config: IndexConfig) -> Result<Self> {
                 Ok(Self {
                     database: lawn_database::Database::new(config.database.clone()).with_context(|| format!("Can not create dream index using database config {:?}", config.database))?,
                 })
             }
 
+            /// Executes a write transaction with exclusive database access.
+            ///
+            /// Acquires a write lock on the entire database and executes the given
+            /// closure with a mutable transaction. This provides exclusive access
+            /// for write operations.
+            ///
+            /// # Arguments
+            ///
+            /// * `f` - A closure that receives a mutable write transaction.
+            ///
+            /// # Returns
+            ///
+            /// `Ok(&mut Self)` on success, allowing method chaining.
             pub fn lock_all_and_write<'a, F>(&'a mut self, mut f: F) -> Result<&'a mut Self>
             where
                 F: FnMut(&mut WriteTransaction<'_, '_>) -> Result<()>,
@@ -605,6 +779,19 @@ macro_rules! define_index {
                 Ok(self)
             }
 
+            /// Executes a read transaction with shared database access.
+            ///
+            /// Acquires a read lock (blocking writes) and executes the given
+            /// closure with a read-only transaction. Multiple reads can proceed
+            /// concurrently, but writes are blocked.
+            ///
+            /// # Arguments
+            ///
+            /// * `f` - A closure that receives a read transaction.
+            ///
+            /// # Returns
+            ///
+            /// `Ok(&Self)` on success.
             pub fn lock_all_writes_and_read<F>(&self, mut f: F) -> Result<&Self>
             where
                 F: FnMut(ReadTransaction) -> Result<()>,
