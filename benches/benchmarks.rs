@@ -8,9 +8,13 @@ use serde::{Deserialize, Serialize};
 extern crate dream;
 use dream::*;
 
+define_index!(test_index {
+} use {
+});
+
 #[derive(Serialize, Deserialize)]
 struct Config {
-    index: IndexConfig,
+    index: test_index::IndexConfig,
     rng_seed: u64,
     total_tags_count: usize,
     object_tags_count: usize,
@@ -25,7 +29,7 @@ fn criterion_benchmark(bencher_context: &mut Criterion) {
     ))
     .unwrap();
 
-    let mut index = Index::new(config.index).unwrap();
+    let mut index = test_index::Index::new(config.index).unwrap();
     let mut rng = WyRand::new_seed(config.rng_seed);
     let mut tags = (0..config.total_tags_count)
         .map(|_| {
