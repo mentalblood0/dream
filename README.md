@@ -19,7 +19,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dream = { path = "path/to/dream" }
+dream = { path = "https://github.com/mentalblood0/dream" }
 ```
 
 ## Core Concepts
