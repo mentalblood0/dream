@@ -10,7 +10,7 @@ The library was developed as [lawn](https://github.com/mentalblood0/lawn)-compat
 
 - pluggable library instead of hardcoded service, so **no forced text preprocessing, any tags can be set to any object**
 - identifiers are **16-byte hashes instead of 4-byte ones** because 4-byte hashes collide on `77000` objects, and 16-byte practically do not collide at all (expected collision is on `1.8 * 10^19` objects)
-- multicursor-based intersection algorithm, which **do not retreive all the objects for all the tags in search query**
+- multicursor-based intersection algorithm, which **do not retreive all the objects for each individual tag in search query** while [sonic](https://github.com/valeriansaliou/sonic) does just this: retrieves all the objects tagged with first tag in query, puts them in set, then retrieves all the objects tagged with second tag in query, puts them in another set, intersects second set with first, throws away second set and proceeds to third tag etc.
 
 ## Internal tables
 
