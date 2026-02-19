@@ -752,31 +752,29 @@ macro_rules! define_index {
             }
 
             /// Executes a write transaction with exclusive database access.
+            /// Executes a write transaction with exclusive database access.
             ///
-            /// Acquires a write lock on the entire database and executes the given
-            /// closure with a mutable transaction. This provides exclusive access
-            /// for write operations.
+            /// Acquires a write lock (blocking all other operations) and executes the given
+            /// closure with a mutable transaction. No other reads or writes can proceed
+            /// concurrently.
             ///
             /// # Arguments
             ///
-            /// * `f` - A closure that receives a mutable write transaction.
+            /// * `f` - A closure that receives a write transaction.
             ///
             /// # Returns
             ///
-            /// `Ok(&mut Self)` on success, allowing method chaining.
-            pub fn lock_all_and_write<'a, F>(&'a mut self, mut f: F) -> Result<&'a mut Self>
+            /// `Ok(R)` on success.
+            pub fn lock_all_and_write<'a, F, R>(&'a mut self, mut f: F) -> Result<R>
             where
-                F: FnMut(&mut WriteTransaction<'_, '_>) -> Result<()>,
+                F: FnMut(&mut WriteTransaction<'_, '_>) -> Result<R>,
             {
                 self.database
                     .lock_all_and_write(|database_write_transaction| {
                         f(&mut WriteTransaction {
                             database_transaction: database_write_transaction,
                         })
-                    }).with_context(|| "Can not lock lawn database and initiate write transaction")?;
-
-
-                Ok(self)
+                    }).with_context(|| "Can not lock lawn database and initiate write transaction")
             }
 
             /// Executes a read transaction with shared database access.
@@ -791,18 +789,17 @@ macro_rules! define_index {
             ///
             /// # Returns
             ///
-            /// `Ok(&Self)` on success.
-            pub fn lock_all_writes_and_read<F>(&self, mut f: F) -> Result<&Self>
+            /// `Ok(R)` on success.
+            pub fn lock_all_writes_and_read<F, R>(&self, mut f: F) -> Result<R>
             where
-                F: FnMut(ReadTransaction) -> Result<()>,
+                F: FnMut(ReadTransaction) -> Result<R>,
             {
                 self.database
                     .lock_all_writes_and_read(|database_read_transaction| {
                         f(ReadTransaction {
                             database_transaction: database_read_transaction,
                         })
-                    }).with_context(|| "Can not lock all write operations on lawn database and initiate read transaction")?;
-                Ok(self)
+                    }).with_context(|| "Can not lock all write operations on lawn database and initiate read transaction")
             }
         }
         }
