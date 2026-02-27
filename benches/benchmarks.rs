@@ -1,4 +1,4 @@
-use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use fallible_iterator::FallibleIterator;
 use nanorand::{Rng, WyRand};
 use std::{fs, io::BufReader};
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 extern crate dream;
 use dream::*;
 
-define_index!(test_index {
+define_index!(test_index(public,) {
 } use {
 });
 
@@ -48,7 +48,7 @@ fn criterion_benchmark(bencher_context: &mut Criterion) {
                     .collect::<Vec<_>>();
                 tags.sort();
                 tags.dedup();
-                transaction.insert(&Object::Raw(object_value), &tags)?;
+                transaction.public_insert(&Object::Raw(object_value), &tags)?;
             }
             Ok(())
         })
@@ -70,7 +70,7 @@ fn criterion_benchmark(bencher_context: &mut Criterion) {
                         |present_tags| {
                             index.lock_all_writes_and_read(|transaction| {
                                 transaction
-                                    .search(&present_tags, &vec![], None)?
+                                    .public_search(&present_tags, &vec![], None)?
                                     .collect::<Vec<_>>()?;
                                 Ok(())
                             })
@@ -98,7 +98,7 @@ fn criterion_benchmark(bencher_context: &mut Criterion) {
                         |present_tags| {
                             index.lock_all_writes_and_read(|transaction| {
                                 transaction
-                                    .search(&present_tags, &vec![], None)?
+                                    .public_search(&present_tags, &vec![], None)?
                                     .collect::<Vec<_>>()?;
                                 Ok(())
                             })

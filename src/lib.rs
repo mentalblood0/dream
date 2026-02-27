@@ -1,6 +1,7 @@
 pub extern crate anyhow;
 pub extern crate fallible_iterator;
 pub extern crate lawn;
+pub extern crate paste;
 pub extern crate serde;
 pub extern crate xxhash_rust;
 
@@ -30,8 +31,12 @@ impl Object {
 
 #[macro_export]
 macro_rules! define_index {
-    ($index_name:ident {
-        $($table_name:ident<$key_type:ty, $value_type:ty>),* $(,)?
+    ($index_name:ident($($schema_name:ident),+ $(,)?) {
+        $(
+            $additional_schema_name:ident {
+                $($table_name:ident<$key_type:ty, $value_type:ty>),+ $(,)?
+            }
+        )*
     } use {
         $($use_item:tt)*
     }) => {
@@ -39,12 +44,20 @@ macro_rules! define_index {
         mod $index_name {
         use $crate::lawn;
         lawn::database::define_database!(lawn_database {
-            tag_and_object<(Id, Id), ()>,
-            object_and_tag<(Id, Id), ()>,
-            id_to_source<Id, Vec<u8>>,
-            tag_to_objects_count<Id, u32>,
-            object_to_tags_count<Id, u32>,
-            $( $table_name<$key_type, $value_type> ),*
+            $(
+                $schema_name {
+                    tag_and_object<(Id, Id), ()>,
+                    object_and_tag<(Id, Id), ()>,
+                    id_to_source<Id, Vec<u8>>,
+                    tag_to_objects_count<Id, u32>,
+                    object_to_tags_count<Id, u32>,
+                },
+            )+
+            $(
+                $additional_schema_name {
+                    $( $table_name<$key_type, $value_type> ),*
+                },
+            )*
         } use {
             use $crate::Id;
             $($use_item)*
@@ -53,6 +66,7 @@ macro_rules! define_index {
         use std::{collections::HashSet, ops::Deref};
         use std::ops::Bound;
 
+        use $crate::paste::paste;
         use $crate::anyhow::{Context, Result, Error, anyhow};
         use $crate::fallible_iterator::FallibleIterator;
         use $crate::serde::{Deserialize, Serialize};
@@ -79,158 +93,172 @@ macro_rules! define_index {
 
         macro_rules! define_read_methods {
             () => {
-                pub fn get_source(&self, id: &Id) -> Result<Option<Object>> {
-                    Ok(self
-                        .database_transaction
-                        .id_to_source
-                        .get(id).with_context(|| format!("Can not get source for id {id:?} from id_to_source table"))?
-                        .and_then(|value| Some(Object::Raw(value))))
-                }
-
-                pub fn has_tag(&self, object: &Object, tag: &Object) -> Result<bool> {
-                    let key = &(object.get_id(), tag.get_id());
-                    Ok(self
-                        .database_transaction
-                        .object_and_tag
-                        .get(key).with_context(|| format!("Can not verify if key {key:?} exists in object_and_tag table"))?
-                        .is_some())
-                }
-
-                pub fn has_object_with_tag(&self, tag: &Object) -> Result<bool> {
-                    let from_tag_and_object= &(tag.get_id(), Id {value: [0u8; 16]});
-                    Ok(self
-                        .database_transaction
-                        .tag_and_object
-                        .iter(Bound::Included(from_tag_and_object), false).with_context(|| format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}"))?
-                        .take_while(|((current_tag_id, _), _)| Ok(*current_tag_id == from_tag_and_object.0))
-                        .next()?
-                        .is_some())
-                }
-
-                pub fn get_tags(&self, object: &Object) -> Result<Vec<Id>> {
-                    let object_id = object.get_id();
-                    let from_object_and_tag = &(object_id.clone(), Id::default());
-                    self.database_transaction
-                        .object_and_tag
-                        .iter(Bound::Included(from_object_and_tag), false).with_context(|| format!("Can not initiate iteration over object_and_tag table starting from key {from_object_and_tag:?}"))?
-                        .take_while(|((current_object_id, _), _)| Ok(current_object_id == &object_id))
-                        .map(|((_, current_tag_id), _)| Ok(current_tag_id))
-                        .collect::<Vec<_>>()
-                }
-
-                pub fn search(
-                    &self,
-                    present_tags: &Vec<Object>,
-                    absent_tags: &Vec<Object>,
-                    start_after_object: Option<Id>,
-                ) -> Result<Box<dyn FallibleIterator<Item = Id, Error = Error> + '_>> {
-                    let absent_tags_ids = {
-                        let mut absent_tags_ids_and_objects_count: Vec<(Id, u32)> = Vec::new();
-                        for tag in absent_tags {
-                            let tag_id = tag.get_id();
-                            if let Some(tag_objects_count) = self
+                $(
+                    paste! {
+                        pub fn [<$schema_name _get_source>](&self, id: &Id) -> Result<Option<Object>> {
+                            Ok(self
                                 .database_transaction
-                                .tag_to_objects_count
-                                .get(&tag_id).with_context(|| format!("Can not get objects count for tag with id {tag_id:?} using tag_to_objects_count table"))?
-                            {
-                                absent_tags_ids_and_objects_count.push((tag_id, tag_objects_count));
-                            }
+                                .$schema_name
+                                .id_to_source
+                                .get(id).with_context(|| format!("Can not get source for id {id:?} from id_to_source table"))?
+                                .and_then(|value| Some(Object::Raw(value))))
                         }
-                        absent_tags_ids_and_objects_count
-                            .sort_by_key(|(_, tag_objects_count)| *tag_objects_count);
-                        absent_tags_ids_and_objects_count.reverse();
-                        absent_tags_ids_and_objects_count
-                            .into_iter()
-                            .map(|(tag, _)| tag)
-                            .collect::<Vec<_>>()
-                    };
-                    Ok(match present_tags.len() {
-                        0 => {
-                            let from_object = &start_after_object.clone().unwrap_or_default();
-                            Box::new(
-                                self.database_transaction
-                                    .object_to_tags_count
-                                    .iter(Bound::Included(from_object), false).with_context(|| format!("Can not initiate iteration over object_to_tags_count table starting from key {from_object:?}"))?
-                                    .skip(if start_after_object.is_some() { 1 } else { 0 })
-                                    .map(|(object_id, _)| Ok(object_id))
-                                    .filter(move |object_id| {
-                                        fallible_iterator::convert(
-                                            absent_tags_ids
-                                                .iter()
-                                                .map(|id| Result::<Id>::Ok(id.clone())),
-                                        )
-                                        .all(|absent_tag_id| {
-                                            let key = &(absent_tag_id.clone(), object_id.clone());
-                                            Ok(self
-                                                .database_transaction
-                                                .tag_and_object
-                                                .get(key).with_context(|| format!("Can not verify if key {key:?} exists in tag_and_object table"))?
-                                                .is_none())
-                                        })
-                                    }),
-                            )
-                        },
-                        1 => {
-                            let search_tag_id = present_tags[0].get_id();
-                            let from_tag_and_object = &(
-                                search_tag_id.clone(),
-                                start_after_object.clone().unwrap_or_default(),
-                            );
-                            Box::new(
-                                self.database_transaction
-                                    .tag_and_object
-                                    .iter(Bound::Included(from_tag_and_object), false).with_context(|| format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}"))?
-                                    .skip(if start_after_object.is_some() { 1 } else { 0 })
-                                    .map(|((tag_id, object_id), _)| Ok((tag_id, object_id)))
-                                    .take_while(move |(tag_id, _)| Ok(tag_id == &search_tag_id))
-                                    .map(|(_, object_id)| Ok(object_id))
-                                    .filter(move |object_id| {
-                                        fallible_iterator::convert(
-                                            absent_tags_ids
-                                                .iter()
-                                                .map(|id| Result::<Id>::Ok(id.clone())),
-                                        )
-                                        .all(|absent_tag_id| {
-                                            let key = &(absent_tag_id.clone(), object_id.clone());
-                                            Ok(self
-                                                .database_transaction
-                                                .tag_and_object
-                                                .get(key).with_context(|| format!("Can not verify if key {key:?} exists in tag_and_object table"))?
-                                                .is_none())
-                                        })
-                                    }),
-                            )
+
+                        pub fn [<$schema_name _has_tag>](&self, object: &Object, tag: &Object) -> Result<bool> {
+                            let key = &(object.get_id(), tag.get_id());
+                            Ok(self
+                                .database_transaction
+                                .$schema_name
+                                .object_and_tag
+                                .get(key).with_context(|| format!("Can not verify if key {key:?} exists in object_and_tag table"))?
+                                .is_some())
                         }
-                        2.. => Box::new(SearchIterator {
-                            database_transaction: self.database_transaction.deref(),
-                            absent_tags_ids,
-                            present_tags_ids: {
-                                let mut present_tags_ids_and_objects_count: Vec<(Id, u32)> = Vec::new();
-                                for tag in present_tags {
+
+                        pub fn [<$schema_name _has_object_with_tag>](&self, tag: &Object) -> Result<bool> {
+                            let from_tag_and_object= &(tag.get_id(), Id {value: [0u8; 16]});
+                            Ok(self
+                                .database_transaction
+                                .$schema_name
+                                .tag_and_object
+                                .iter(Bound::Included(from_tag_and_object), false).with_context(|| format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}"))?
+                                .take_while(|((current_tag_id, _), _)| Ok(*current_tag_id == from_tag_and_object.0))
+                                .next()?
+                                .is_some())
+                        }
+
+                        pub fn [<$schema_name _get_tags>](&self, object: &Object) -> Result<Vec<Id>> {
+                            let object_id = object.get_id();
+                            let from_object_and_tag = &(object_id.clone(), Id::default());
+                            self.database_transaction
+                                .$schema_name
+                                .object_and_tag
+                                .iter(Bound::Included(from_object_and_tag), false).with_context(|| format!("Can not initiate iteration over object_and_tag table starting from key {from_object_and_tag:?}"))?
+                                .take_while(|((current_object_id, _), _)| Ok(current_object_id == &object_id))
+                                .map(|((_, current_tag_id), _)| Ok(current_tag_id))
+                                .collect::<Vec<_>>()
+                        }
+
+                        pub fn [<$schema_name _search>](
+                            &self,
+                            present_tags: &Vec<Object>,
+                            absent_tags: &Vec<Object>,
+                            start_after_object: Option<Id>,
+                        ) -> Result<Box<dyn FallibleIterator<Item = Id, Error = Error> + '_>> {
+                            let absent_tags_ids = {
+                                let mut absent_tags_ids_and_objects_count: Vec<(Id, u32)> = Vec::new();
+                                for tag in absent_tags {
                                     let tag_id = tag.get_id();
-                                    present_tags_ids_and_objects_count.push((
-                                        tag_id.clone(),
-                                        self.database_transaction
-                                            .tag_to_objects_count
-                                            .get(&tag_id).with_context(|| format!("Can not get objects count for tag with id {tag_id:?} using tag_to_objects_count table"))?
-                                            .unwrap_or(0 as u32),
-                                    ));
+                                    if let Some(tag_objects_count) = self
+                                        .database_transaction
+                                        .$schema_name
+                                        .tag_to_objects_count
+                                        .get(&tag_id).with_context(|| format!("Can not get objects count for tag with id {tag_id:?} using tag_to_objects_count table"))?
+                                    {
+                                        absent_tags_ids_and_objects_count.push((tag_id, tag_objects_count));
+                                    }
                                 }
-                                present_tags_ids_and_objects_count
+                                absent_tags_ids_and_objects_count
                                     .sort_by_key(|(_, tag_objects_count)| *tag_objects_count);
-                                present_tags_ids_and_objects_count
+                                absent_tags_ids_and_objects_count.reverse();
+                                absent_tags_ids_and_objects_count
                                     .into_iter()
                                     .map(|(tag, _)| tag)
                                     .collect::<Vec<_>>()
-                            },
-                            start_after_object,
-                            cursors: Vec::new(),
-                            index_1: 0 as usize,
-                            index_2: 1 as usize,
-                            end: false,
-                        }),
-                    })
-                }
+                            };
+                            Ok(match present_tags.len() {
+                                0 => {
+                                    let from_object = &start_after_object.clone().unwrap_or_default();
+                                    Box::new(
+                                        self.database_transaction
+                                            .$schema_name
+                                            .object_to_tags_count
+                                            .iter(Bound::Included(from_object), false).with_context(|| format!("Can not initiate iteration over object_to_tags_count table starting from key {from_object:?}"))?
+                                            .skip(if start_after_object.is_some() { 1 } else { 0 })
+                                            .map(|(object_id, _)| Ok(object_id))
+                                            .filter(move |object_id| {
+                                                fallible_iterator::convert(
+                                                    absent_tags_ids
+                                                        .iter()
+                                                        .map(|id| Result::<Id>::Ok(id.clone())),
+                                                )
+                                                .all(|absent_tag_id| {
+                                                    let key = &(absent_tag_id.clone(), object_id.clone());
+                                                    Ok(self
+                                                        .database_transaction
+                                                        .$schema_name
+                                                        .tag_and_object
+                                                        .get(key).with_context(|| format!("Can not verify if key {key:?} exists in tag_and_object table"))?
+                                                        .is_none())
+                                                })
+                                            }),
+                                    )
+                                },
+                                1 => {
+                                    let search_tag_id = present_tags[0].get_id();
+                                    let from_tag_and_object = &(
+                                        search_tag_id.clone(),
+                                        start_after_object.clone().unwrap_or_default(),
+                                    );
+                                    Box::new(
+                                        self.database_transaction
+                                            .$schema_name
+                                            .tag_and_object
+                                            .iter(Bound::Included(from_tag_and_object), false).with_context(|| format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}"))?
+                                            .skip(if start_after_object.is_some() { 1 } else { 0 })
+                                            .map(|((tag_id, object_id), _)| Ok((tag_id, object_id)))
+                                            .take_while(move |(tag_id, _)| Ok(tag_id == &search_tag_id))
+                                            .map(|(_, object_id)| Ok(object_id))
+                                            .filter(move |object_id| {
+                                                fallible_iterator::convert(
+                                                    absent_tags_ids
+                                                        .iter()
+                                                        .map(|id| Result::<Id>::Ok(id.clone())),
+                                                )
+                                                .all(|absent_tag_id| {
+                                                    let key = &(absent_tag_id.clone(), object_id.clone());
+                                                    Ok(self
+                                                        .database_transaction
+                                                        .$schema_name
+                                                        .tag_and_object
+                                                        .get(key).with_context(|| format!("Can not verify if key {key:?} exists in tag_and_object table"))?
+                                                        .is_none())
+                                                })
+                                            }),
+                                    )
+                                }
+                                2.. => Box::new([<$schema_name:camel SearchIterator>] {
+                                    database_transaction: self.database_transaction.deref(),
+                                    absent_tags_ids,
+                                    present_tags_ids: {
+                                        let mut present_tags_ids_and_objects_count: Vec<(Id, u32)> = Vec::new();
+                                        for tag in present_tags {
+                                            let tag_id = tag.get_id();
+                                            present_tags_ids_and_objects_count.push((
+                                                tag_id.clone(),
+                                                self.database_transaction
+                                                    .$schema_name
+                                                    .tag_to_objects_count
+                                                    .get(&tag_id).with_context(|| format!("Can not get objects count for tag with id {tag_id:?} using tag_to_objects_count table"))?
+                                                    .unwrap_or(0 as u32),
+                                            ));
+                                        }
+                                        present_tags_ids_and_objects_count
+                                            .sort_by_key(|(_, tag_objects_count)| *tag_objects_count);
+                                        present_tags_ids_and_objects_count
+                                            .into_iter()
+                                            .map(|(tag, _)| tag)
+                                            .collect::<Vec<_>>()
+                                    },
+                                    start_after_object,
+                                    cursors: Vec::new(),
+                                    index_1: 0 as usize,
+                                    index_2: 1 as usize,
+                                    end: false,
+                                }),
+                            })
+                        }
+                    }
+                )+
             };
         }
 
@@ -241,347 +269,377 @@ macro_rules! define_index {
         impl<'a, 'b> WriteTransaction<'a, 'b> {
             define_read_methods!();
 
-            pub fn insert(&mut self, object: &Object, tags: &Vec<Object>) -> Result<&mut Self> {
-                let object_id = object.get_id();
-                if let Object::Raw(raw) = object {
-                    self.database_transaction
-                        .id_to_source
-                        .insert(object_id.clone(), raw.clone());
-                }
-                let existent_tags = HashSet::<Id>::from_iter(self.get_tags(object).with_context(|| format!("Can not get tags for object {object:?}"))?.into_iter());
-                let mut tags_added = 0 as u32;
-                for tag in tags {
-                    let tag_id = tag.get_id();
-                    if existent_tags.contains(&tag_id) {
-                        continue;
-                    }
-                    self.database_transaction
-                        .tag_and_object
-                        .insert((tag_id.clone(), object_id.clone()), ());
-                    self.database_transaction
-                        .object_and_tag
-                        .insert((object_id.clone(), tag_id.clone()), ());
-                    if let Object::Raw(raw) = tag {
-                        self.database_transaction
-                            .id_to_source
-                            .insert(tag_id.clone(), raw.clone());
-                    }
-                    let new_tag_objects_count = self
-                        .database_transaction
-                        .tag_to_objects_count
-                        .get(&tag_id).with_context(|| format!("Can not get objects count for tag with id {tag_id:?} using tag_to_objects_count table"))?
-                        .unwrap_or(0 as u32)
-                        + 1;
-                    self.database_transaction
-                        .tag_to_objects_count
-                        .insert(tag_id.clone(), new_tag_objects_count);
-                    tags_added += 1;
-                }
-                self.database_transaction
-                    .object_to_tags_count
-                    .insert(object_id.clone(), existent_tags.len() as u32 + tags_added);
-                Ok(self)
-            }
-
-            pub fn remove_object(&mut self, object: &Object) -> Result<&mut Self> {
-                let object_id = object.get_id();
-                if self
-                    .database_transaction
-                    .object_to_tags_count
-                    .get(&object_id).with_context(|| format!("Can not get tags count for object with id {object_id:?} using object_to_tags_count table"))?
-                    .is_none()
-                {
-                    return Ok(self);
-                }
-                if let Object::Raw(_) = object {
-                    self.database_transaction.id_to_source.remove(&object_id);
-                }
-                let from_object_and_tag = &(object_id.clone(), Id::default());
-                let object_and_tag_iterator = self
-                    .database_transaction
-                    .object_and_tag
-                    .iter(Bound::Included(from_object_and_tag), false).with_context(|| format!("Can not initiate iteration over object_and_tag table starting from key {from_object_and_tag:?}"))?
-                    .take_while(|((current_object_id, _), _)| Ok(current_object_id == &object_id))
-                    .collect::<Vec<_>>().with_context(|| format!("Can not collect from iteration over object_and_tag table starting from key {from_object_and_tag:?} taking while object id is {object_id:?}"))?;
-                for ((current_object_id, current_tag_id), _) in object_and_tag_iterator {
-                    self.database_transaction
-                        .tag_and_object
-                        .remove(&(current_tag_id.clone(), current_object_id.clone()));
-                    self.database_transaction
-                        .object_and_tag
-                        .remove(&(current_object_id, current_tag_id.clone()));
-                    let new_tag_objects_count = self
-                        .database_transaction
-                        .tag_to_objects_count
-                        .get(&current_tag_id).with_context(|| format!("Can not get objects count for tag with id {current_tag_id:?} using tag_to_objects_count table"))?
-                        .unwrap_or(0 as u32)
-                        - 1;
-                    self.database_transaction
-                        .tag_to_objects_count
-                        .insert(current_tag_id, new_tag_objects_count);
-                }
-                self.database_transaction
-                    .object_to_tags_count
-                    .remove(&object_id);
-
-                Ok(self)
-            }
-
-            pub fn remove_tags_from_object(
-                &mut self,
-                object: &Object,
-                tags: &Vec<Object>,
-            ) -> Result<&mut Self> {
-                let object_id = object.get_id();
-                if self
-                    .database_transaction
-                    .object_to_tags_count
-                    .get(&object_id).with_context(|| format!("Can not get tags count for object with id {object_id:?} using object_to_tags_count table"))?
-                    .is_none()
-                {
-                    return Ok(self);
-                }
-                let tags_before_remove = HashSet::<Id>::from_iter(self.get_tags(object).with_context(|| format!("Can not get tags for object {object:?}"))?.into_iter());
-                let mut tags_removed_from_object: u32 = 0;
-                for tag in tags {
-                    let tag_id = tag.get_id();
-                    if !tags_before_remove.contains(&tag_id) {
-                        continue;
-                    }
-                    self.database_transaction
-                        .tag_and_object
-                        .remove(&(tag_id.clone(), object_id.clone()));
-                    self.database_transaction
-                        .object_and_tag
-                        .remove(&(object_id.clone(), tag_id.clone()));
-                    let new_tag_objects_count = self
-                        .database_transaction
-                        .tag_to_objects_count
-                        .get(&tag_id).with_context(|| format!("Can not get objects count for tag with id {tag_id:?} using tag_to_objects_count table"))?
-                        .ok_or(anyhow!("No objects count record for tag {tag:?}"))?
-                        - 1;
-                    if new_tag_objects_count > 0 {
-                        self.database_transaction
-                            .tag_to_objects_count
-                            .insert(tag_id.clone(), new_tag_objects_count.clone());
-                    } else {
-                        self.database_transaction
-                            .tag_to_objects_count
-                            .remove(&tag_id);
-                        if let Object::Raw(_) = tag {
-                            self.database_transaction.id_to_source.remove(&tag_id);
+            $(
+                paste! {
+                    pub fn [<$schema_name _insert>](&mut self, object: &Object, tags: &Vec<Object>) -> Result<&mut Self> {
+                        let object_id = object.get_id();
+                        if let Object::Raw(raw) = object {
+                            self.database_transaction
+                                .$schema_name
+                                .id_to_source
+                                .insert(object_id.clone(), raw.clone());
                         }
-                    }
-                    tags_removed_from_object += 1;
-                }
-                if tags_removed_from_object == tags_before_remove.len() as u32 {
-                    self.database_transaction
-                        .object_to_tags_count
-                        .remove(&object_id);
-                    if let Object::Raw(_) = object {
-                        self.database_transaction.id_to_source.remove(&object_id);
-                    }
-                } else {
-                    self.database_transaction.object_to_tags_count.insert(
-                        object_id.clone(),
-                        tags_before_remove.len() as u32 - tags_removed_from_object,
-                    );
-                }
-
-                Ok(self)
-            }
-        }
-
-        struct Cursor<'a> {
-            iterator: Box<dyn FallibleIterator<Item = ((Id, Id), ()), Error = Error> + 'a>,
-            current_value: Option<(Id, Id)>,
-        }
-
-        impl<'a> Cursor<'a> {
-            fn new(
-                mut iterator: Box<dyn FallibleIterator<Item = ((Id, Id), ()), Error = Error> + 'a>,
-            ) -> Result<Self> {
-                let current_value = iterator
-                    .next().with_context(|| "Can not get first value from iterator")?
-                    .and_then(|(current_value, _)| Some(current_value));
-                Ok(Self {
-                    iterator,
-                    current_value,
-                })
-            }
-
-            fn next(&mut self) -> Result<()> {
-                self.current_value = self
-                    .iterator
-                    .next().with_context(|| format!("Can not get next value from iterator after value {:?}", self.current_value))?
-                    .and_then(|(current_value, _)| Some(current_value));
-                Ok(())
-            }
-        }
-
-        pub struct SearchIterator<'a> {
-            database_transaction: &'a lawn_database::TablesTransactions,
-            present_tags_ids: Vec<Id>,
-            absent_tags_ids: Vec<Id>,
-            start_after_object: Option<Id>,
-            cursors: Vec<Cursor<'a>>,
-            index_1: usize,
-            index_2: usize,
-            end: bool,
-        }
-
-        impl<'a> FallibleIterator for SearchIterator<'a> {
-            type Item = Id;
-            type Error = Error;
-
-            fn next(&mut self) -> Result<Option<Self::Item>, Self::Error> {
-                if self.end {
-                    return Ok(None);
-                }
-                loop {
-                    if self.cursors.len() == self.present_tags_ids.len() {
-                        let first_cursor_object = self.cursors[0].current_value.clone().unwrap().1;
-                        if self.cursors.iter().all(|cursor| {
-                            cursor
-                                .current_value
-                                .clone()
-                                .is_some_and(|current_value| current_value.1 == first_cursor_object)
-                        }) {
-                            let result = if fallible_iterator::convert(
-                                self.absent_tags_ids
-                                    .iter()
-                                    .map(|id| Result::<Id>::Ok(id.clone())),
-                            )
-                            .all(|tag_id| {
-                                let key = &(tag_id.clone(), first_cursor_object.clone());
-                                Ok(self
-                                    .database_transaction
-                                    .tag_and_object
-                                    .get(key).with_context(|| format!("Can not verify if key {key:?} exists in tag_and_object table"))?
-                                    .is_none())
-                            })? {
-                                Some(first_cursor_object)
-                            } else {
-                                None
-                            };
-                            self.cursors[0].next().with_context(|| format!("Can not get next value for first cursor after value {:?}", self.cursors[0].current_value))?;
-                            if !self.cursors[0]
-                                .current_value
-                                .as_ref()
-                                .is_some_and(|first_cursor_value| {
-                                    first_cursor_value.0 == self.present_tags_ids[0]
-                                })
-                            {
-                                self.end = true;
+                        let existent_tags = HashSet::<Id>::from_iter(self.[<$schema_name _get_tags>](object).with_context(|| format!("Can not get tags for object {object:?}"))?.into_iter());
+                        let mut tags_added = 0 as u32;
+                        for tag in tags {
+                            let tag_id = tag.get_id();
+                            if existent_tags.contains(&tag_id) {
+                                continue;
                             }
-                            return Ok(result);
+                            self.database_transaction
+                                .$schema_name
+                                .tag_and_object
+                                .insert((tag_id.clone(), object_id.clone()), ());
+                            self.database_transaction
+                                .$schema_name
+                                .object_and_tag
+                                .insert((object_id.clone(), tag_id.clone()), ());
+                            if let Object::Raw(raw) = tag {
+                                self.database_transaction
+                                    .$schema_name
+                                    .id_to_source
+                                    .insert(tag_id.clone(), raw.clone());
+                            }
+                            let new_tag_objects_count = self
+                                .database_transaction
+                                .$schema_name
+                                .tag_to_objects_count
+                                .get(&tag_id).with_context(|| format!("Can not get objects count for tag with id {tag_id:?} using tag_to_objects_count table"))?
+                                .unwrap_or(0 as u32)
+                                + 1;
+                            self.database_transaction
+                                .$schema_name
+                                .tag_to_objects_count
+                                .insert(tag_id.clone(), new_tag_objects_count);
+                            tags_added += 1;
                         }
+                        self.database_transaction
+                            .$schema_name
+                            .object_to_tags_count
+                            .insert(object_id.clone(), existent_tags.len() as u32 + tags_added);
+                        Ok(self)
                     }
 
-                    if self.cursors.len() < self.present_tags_ids.len()
-                        && self.cursors.len() <= self.index_1
-                    {
-                        let from_tag_and_object = &(
-                            self.present_tags_ids[self.index_1].clone(),
-                            if self.index_1 == 0 {
-                                self.start_after_object.clone().unwrap_or_default()
+                    pub fn [<$schema_name _remove_object>](&mut self, object: &Object) -> Result<&mut Self> {
+                        let object_id = object.get_id();
+                        if self
+                            .database_transaction
+                            .$schema_name
+                            .object_to_tags_count
+                            .get(&object_id).with_context(|| format!("Can not get tags count for object with id {object_id:?} using object_to_tags_count table"))?
+                            .is_none()
+                        {
+                            return Ok(self);
+                        }
+                        if let Object::Raw(_) = object {
+                            self.database_transaction.$schema_name.id_to_source.remove(&object_id);
+                        }
+                        let from_object_and_tag = &(object_id.clone(), Id::default());
+                        let object_and_tag_iterator = self
+                            .database_transaction
+                            .$schema_name
+                            .object_and_tag
+                            .iter(Bound::Included(from_object_and_tag), false).with_context(|| format!("Can not initiate iteration over object_and_tag table starting from key {from_object_and_tag:?}"))?
+                            .take_while(|((current_object_id, _), _)| Ok(current_object_id == &object_id))
+                            .collect::<Vec<_>>().with_context(|| format!("Can not collect from iteration over object_and_tag table starting from key {from_object_and_tag:?} taking while object id is {object_id:?}"))?;
+                        for ((current_object_id, current_tag_id), _) in object_and_tag_iterator {
+                            self.database_transaction
+                                .$schema_name
+                                .tag_and_object
+                                .remove(&(current_tag_id.clone(), current_object_id.clone()));
+                            self.database_transaction
+                                .$schema_name
+                                .object_and_tag
+                                .remove(&(current_object_id, current_tag_id.clone()));
+                            let new_tag_objects_count = self
+                                .database_transaction
+                                .$schema_name
+                                .tag_to_objects_count
+                                .get(&current_tag_id).with_context(|| format!("Can not get objects count for tag with id {current_tag_id:?} using tag_to_objects_count table"))?
+                                .unwrap_or(0 as u32)
+                                - 1;
+                            self.database_transaction
+                                .$schema_name
+                                .tag_to_objects_count
+                                .insert(current_tag_id, new_tag_objects_count);
+                        }
+                        self.database_transaction
+                            .$schema_name
+                            .object_to_tags_count
+                            .remove(&object_id);
+
+                        Ok(self)
+                    }
+
+                    pub fn [<$schema_name _remove_tags_from_object>](
+                        &mut self,
+                        object: &Object,
+                        tags: &Vec<Object>,
+                    ) -> Result<&mut Self> {
+                        let object_id = object.get_id();
+                        if self
+                            .database_transaction
+                            .$schema_name
+                            .object_to_tags_count
+                            .get(&object_id).with_context(|| format!("Can not get tags count for object with id {object_id:?} using object_to_tags_count table"))?
+                            .is_none()
+                        {
+                            return Ok(self);
+                        }
+                        let tags_before_remove = HashSet::<Id>::from_iter(self.[<$schema_name _get_tags>](object).with_context(|| format!("Can not get tags for object {object:?}"))?.into_iter());
+                        let mut tags_removed_from_object: u32 = 0;
+                        for tag in tags {
+                            let tag_id = tag.get_id();
+                            if !tags_before_remove.contains(&tag_id) {
+                                continue;
+                            }
+                            self.database_transaction
+                                .$schema_name
+                                .tag_and_object
+                                .remove(&(tag_id.clone(), object_id.clone()));
+                            self.database_transaction
+                                .$schema_name
+                                .object_and_tag
+                                .remove(&(object_id.clone(), tag_id.clone()));
+                            let new_tag_objects_count = self
+                                .database_transaction
+                                .$schema_name
+                                .tag_to_objects_count
+                                .get(&tag_id).with_context(|| format!("Can not get objects count for tag with id {tag_id:?} using tag_to_objects_count table"))?
+                                .ok_or(anyhow!("No objects count record for tag {tag:?}"))?
+                                - 1;
+                            if new_tag_objects_count > 0 {
+                                self.database_transaction
+                                    .$schema_name
+                                    .tag_to_objects_count
+                                    .insert(tag_id.clone(), new_tag_objects_count.clone());
                             } else {
-                                self.cursors
-                                    .last()
-                                    .unwrap()
+                                self.database_transaction
+                                    .$schema_name
+                                    .tag_to_objects_count
+                                    .remove(&tag_id);
+                                if let Object::Raw(_) = tag {
+                                    self.database_transaction.$schema_name.id_to_source.remove(&tag_id);
+                                }
+                            }
+                            tags_removed_from_object += 1;
+                        }
+                        if tags_removed_from_object == tags_before_remove.len() as u32 {
+                            self.database_transaction
+                                .$schema_name
+                                .object_to_tags_count
+                                .remove(&object_id);
+                            if let Object::Raw(_) = object {
+                                self.database_transaction.$schema_name.id_to_source.remove(&object_id);
+                            }
+                        } else {
+                            self.database_transaction.$schema_name.object_to_tags_count.insert(
+                                object_id.clone(),
+                                tags_before_remove.len() as u32 - tags_removed_from_object,
+                            );
+                        }
+
+                        Ok(self)
+                    }
+                }
+            )+
+        }
+
+        $(
+            paste! {
+                struct [<$schema_name:camel Cursor>]<'a> {
+                    iterator: Box<dyn FallibleIterator<Item = ((Id, Id), ()), Error = Error> + 'a>,
+                    current_value: Option<(Id, Id)>,
+                }
+
+                impl<'a> [<$schema_name:camel Cursor>]<'a> {
+                    fn new(
+                        mut iterator: Box<dyn FallibleIterator<Item = ((Id, Id), ()), Error = Error> + 'a>,
+                    ) -> Result<Self> {
+                        let current_value = iterator
+                            .next().with_context(|| "Can not get first value from iterator")?
+                            .and_then(|(current_value, _)| Some(current_value));
+                        Ok(Self {
+                            iterator,
+                            current_value,
+                        })
+                    }
+
+                    fn next(&mut self) -> Result<()> {
+                        self.current_value = self
+                            .iterator
+                            .next().with_context(|| format!("Can not get next value from iterator after value {:?}", self.current_value))?
+                            .and_then(|(current_value, _)| Some(current_value));
+                        Ok(())
+                    }
+                }
+
+                pub struct [<$schema_name:camel SearchIterator>]<'a> {
+                    database_transaction: &'a lawn_database::TablesTransactions,
+                    present_tags_ids: Vec<Id>,
+                    absent_tags_ids: Vec<Id>,
+                    start_after_object: Option<Id>,
+                    cursors: Vec<[<$schema_name:camel Cursor>]<'a>>,
+                    index_1: usize,
+                    index_2: usize,
+                    end: bool,
+                }
+
+                impl<'a> FallibleIterator for [<$schema_name:camel SearchIterator>]<'a> {
+                    type Item = Id;
+                    type Error = Error;
+
+                    fn next(&mut self) -> Result<Option<Self::Item>, Self::Error> {
+                        if self.end {
+                            return Ok(None);
+                        }
+                        loop {
+                            if self.cursors.len() == self.present_tags_ids.len() {
+                                let first_cursor_object = self.cursors[0].current_value.clone().unwrap().1;
+                                if self.cursors.iter().all(|cursor| {
+                                    cursor
+                                        .current_value
+                                        .clone()
+                                        .is_some_and(|current_value| current_value.1 == first_cursor_object)
+                                }) {
+                                    let result = if fallible_iterator::convert(
+                                        self.absent_tags_ids
+                                            .iter()
+                                            .map(|id| Result::<Id>::Ok(id.clone())),
+                                    )
+                                    .all(|tag_id| {
+                                        let key = &(tag_id.clone(), first_cursor_object.clone());
+                                        Ok(self
+                                            .database_transaction
+                                            .$schema_name
+                                            .tag_and_object
+                                            .get(key).with_context(|| format!("Can not verify if key {key:?} exists in tag_and_object table"))?
+                                            .is_none())
+                                    })? {
+                                        Some(first_cursor_object)
+                                    } else {
+                                        None
+                                    };
+                                    self.cursors[0].next().with_context(|| format!("Can not get next value for first cursor after value {:?}", self.cursors[0].current_value))?;
+                                    if !self.cursors[0]
+                                        .current_value
+                                        .as_ref()
+                                        .is_some_and(|first_cursor_value| {
+                                            first_cursor_value.0 == self.present_tags_ids[0]
+                                        })
+                                    {
+                                        self.end = true;
+                                    }
+                                    return Ok(result);
+                                }
+                            }
+
+                            if self.cursors.len() < self.present_tags_ids.len()
+                                && self.cursors.len() <= self.index_1
+                            {
+                                let from_tag_and_object = &(
+                                    self.present_tags_ids[self.index_1].clone(),
+                                    if self.index_1 == 0 {
+                                        self.start_after_object.clone().unwrap_or_default()
+                                    } else {
+                                        self.cursors
+                                            .last()
+                                            .unwrap()
+                                            .current_value
+                                            .clone()
+                                            .unwrap()
+                                            .1
+                                    },
+                                );
+                                let mut cursor =
+                                    [<$schema_name:camel Cursor>]::new(self.database_transaction.$schema_name.tag_and_object.iter(Bound::Included(from_tag_and_object), false).with_context(|| format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}"))?)?;
+                                if self.index_1 == 0 && self.start_after_object.is_some() {
+                                    cursor.next().with_context(|| format!("Can not propagate newely created cursor further (even getting nothing) to skip current entry as start_after_object {:?} is provided", self.start_after_object))?;
+                                }
+                                if !cursor
                                     .current_value
-                                    .clone()
-                                    .unwrap()
-                                    .1
-                            },
-                        );
-                        let mut cursor =
-                            Cursor::new(self.database_transaction.tag_and_object.iter(Bound::Included(from_tag_and_object), false).with_context(|| format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}"))?)?;
-                        if self.index_1 == 0 && self.start_after_object.is_some() {
-                            cursor.next().with_context(|| format!("Can not propagate newely created cursor further (even getting nothing) to skip current entry as start_after_object {:?} is provided", self.start_after_object))?;
-                        }
-                        if !cursor
-                            .current_value
-                            .as_ref()
-                            .is_some_and(|first_cursor_value| {
-                                first_cursor_value.0 == self.present_tags_ids[self.index_1]
-                            })
-                        {
-                            self.end = true;
-                            return Ok(None);
-                        }
-                        self.cursors.push(cursor);
-                    }
+                                    .as_ref()
+                                    .is_some_and(|first_cursor_value| {
+                                        first_cursor_value.0 == self.present_tags_ids[self.index_1]
+                                    })
+                                {
+                                    self.end = true;
+                                    return Ok(None);
+                                }
+                                self.cursors.push(cursor);
+                            }
 
-                    if self.cursors.len() < self.present_tags_ids.len()
-                        && self.cursors.len() <= self.index_2
-                    {
-                        let from_tag_and_object = &(
-                            self.present_tags_ids[self.index_2].clone(),
-                            self.cursors
-                                .last()
-                                .unwrap()
-                                .current_value
-                                .clone()
-                                .unwrap()
-                                .1,
-                        );
-                        let cursor = Cursor::new(
-                            self.database_transaction.tag_and_object.iter(Bound::Included(from_tag_and_object), false).with_context(|| format!("Can not initiate iteration over tag_and_object table starting with key {from_tag_and_object:?}"))?,
-                        )?;
-                        if !cursor
-                            .current_value
-                            .as_ref()
-                            .is_some_and(|first_cursor_value| {
-                                first_cursor_value.0 == self.present_tags_ids[self.index_2]
-                            })
-                        {
-                            self.end = true;
-                            return Ok(None);
-                        }
-                        self.cursors.push(cursor);
-                    }
-
-                    while self.cursors[self.index_2].current_value.as_ref().unwrap().1
-                        < self.cursors[self.index_1].current_value.as_ref().unwrap().1
-                    {
-                        self.cursors[self.index_2].next().with_context(|| format!("Can not propagate {:?}-th cursor further", self.index_2 + 1))?;
-                        if !self.cursors[self.index_2]
-                            .current_value
-                            .as_ref()
-                            .is_some_and(|current_value| {
-                                current_value.0 == self.present_tags_ids[self.index_2]
-                            })
-                        {
-                            self.end = true;
-                            return Ok(None);
-                        }
-                    }
-                    if self.cursors[self.index_2].current_value.as_ref().unwrap().1
-                        == self.cursors[self.index_1].current_value.as_ref().unwrap().1
-                    {
-                        self.index_1 = (self.index_1 + 1) % self.present_tags_ids.len();
-                        self.index_2 = (self.index_2 + 1) % self.present_tags_ids.len();
-                    } else {
-                        while self.cursors[0].current_value.as_ref().unwrap().1
-                            < self.cursors[self.index_2].current_value.as_ref().unwrap().1
-                        {
-                            self.cursors[0].next().with_context(|| format!("Can not propagate first cursor further"))?;
-                            if !self.cursors[0]
-                                .current_value
-                                .as_ref()
-                                .is_some_and(|current_value| current_value.0 == self.present_tags_ids[0])
+                            if self.cursors.len() < self.present_tags_ids.len()
+                                && self.cursors.len() <= self.index_2
                             {
-                                self.end = true;
-                                return Ok(None);
+                                let from_tag_and_object = &(
+                                    self.present_tags_ids[self.index_2].clone(),
+                                    self.cursors
+                                        .last()
+                                        .unwrap()
+                                        .current_value
+                                        .clone()
+                                        .unwrap()
+                                        .1,
+                                );
+                                let cursor = [<$schema_name:camel Cursor>]::new(
+                                    self.database_transaction.$schema_name.tag_and_object.iter(Bound::Included(from_tag_and_object), false).with_context(|| format!("Can not initiate iteration over tag_and_object table starting with key {from_tag_and_object:?}"))?,
+                                )?;
+                                if !cursor
+                                    .current_value
+                                    .as_ref()
+                                    .is_some_and(|first_cursor_value| {
+                                        first_cursor_value.0 == self.present_tags_ids[self.index_2]
+                                    })
+                                {
+                                    self.end = true;
+                                    return Ok(None);
+                                }
+                                self.cursors.push(cursor);
+                            }
+
+                            while self.cursors[self.index_2].current_value.as_ref().unwrap().1
+                                < self.cursors[self.index_1].current_value.as_ref().unwrap().1
+                            {
+                                self.cursors[self.index_2].next().with_context(|| format!("Can not propagate {:?}-th cursor further", self.index_2 + 1))?;
+                                if !self.cursors[self.index_2]
+                                    .current_value
+                                    .as_ref()
+                                    .is_some_and(|current_value| {
+                                        current_value.0 == self.present_tags_ids[self.index_2]
+                                    })
+                                {
+                                    self.end = true;
+                                    return Ok(None);
+                                }
+                            }
+                            if self.cursors[self.index_2].current_value.as_ref().unwrap().1
+                                == self.cursors[self.index_1].current_value.as_ref().unwrap().1
+                            {
+                                self.index_1 = (self.index_1 + 1) % self.present_tags_ids.len();
+                                self.index_2 = (self.index_2 + 1) % self.present_tags_ids.len();
+                            } else {
+                                while self.cursors[0].current_value.as_ref().unwrap().1
+                                    < self.cursors[self.index_2].current_value.as_ref().unwrap().1
+                                {
+                                    self.cursors[0].next().with_context(|| format!("Can not propagate first cursor further"))?;
+                                    if !self.cursors[0]
+                                        .current_value
+                                        .as_ref()
+                                        .is_some_and(|current_value| current_value.0 == self.present_tags_ids[0])
+                                    {
+                                        self.end = true;
+                                        return Ok(None);
+                                    }
+                                }
+                                self.index_1 = 0;
+                                self.index_2 = 1;
                             }
                         }
-                        self.index_1 = 0;
-                        self.index_2 = 1;
                     }
                 }
             }
-        }
+        )+
 
         impl Index {
             pub fn new(config: IndexConfig) -> Result<Self> {
@@ -618,7 +676,7 @@ macro_rules! define_index {
     };
 }
 
-define_index!(test_index {
+define_index!(test_index(public,) {
 } use {
 });
 
@@ -659,105 +717,105 @@ mod tests {
         index
             .lock_all_and_write(|transaction| {
                 transaction
-                    .insert(&o1, &vec![a.clone()])
+                    .public_insert(&o1, &vec![a.clone()])
                     .unwrap()
-                    .insert(&o2, &vec![a.clone(), b.clone()])
+                    .public_insert(&o2, &vec![a.clone(), b.clone()])
                     .unwrap()
-                    .insert(&o3, &vec![a.clone(), b.clone(), c.clone()])
+                    .public_insert(&o3, &vec![a.clone(), b.clone(), c.clone()])
                     .unwrap();
                 assert_eq!(
                     transaction
-                        .search(&vec![a.clone(), b.clone(), c.clone()], &vec![], None)?
+                        .public_search(&vec![a.clone(), b.clone(), c.clone()], &vec![], None)?
                         .collect::<Vec<_>>()?,
                     [o3.get_id()]
                 );
                 assert_eq!(
                     transaction
-                        .search(&vec![a.clone(), b.clone()], &vec![], None)?
+                        .public_search(&vec![a.clone(), b.clone()], &vec![], None)?
                         .collect::<Vec<_>>()?,
                     [o3.get_id(), o2.get_id()]
                 );
                 assert_eq!(
                     transaction
-                        .search(&vec![a.clone()], &vec![], None)?
+                        .public_search(&vec![a.clone()], &vec![], None)?
                         .collect::<Vec<_>>()?,
                     [o3.get_id(), o2.get_id(), o1.get_id()]
                 );
 
                 assert_eq!(
                     transaction
-                        .search(&vec![a.clone()], &vec![a.clone()], None)?
+                        .public_search(&vec![a.clone()], &vec![a.clone()], None)?
                         .collect::<Vec<_>>()?,
                     []
                 );
                 assert_eq!(
                     transaction
-                        .search(&vec![a.clone()], &vec![], Some(o1.get_id()))?
+                        .public_search(&vec![a.clone()], &vec![], Some(o1.get_id()))?
                         .collect::<Vec<_>>()?,
                     []
                 );
                 assert_eq!(
                     transaction
-                        .search(&vec![], &vec![], Some(o1.get_id()))?
+                        .public_search(&vec![], &vec![], Some(o1.get_id()))?
                         .collect::<Vec<_>>()?,
                     []
                 );
                 assert_eq!(
                     transaction
-                        .search(&vec![], &vec![a.clone(), b.clone(), c.clone()], None)?
+                        .public_search(&vec![], &vec![a.clone(), b.clone(), c.clone()], None)?
                         .collect::<Vec<_>>()?,
                     []
                 );
 
                 assert_eq!(
                     transaction
-                        .search(&vec![a.clone()], &vec![b.clone()], None)?
+                        .public_search(&vec![a.clone()], &vec![b.clone()], None)?
                         .collect::<Vec<_>>()?,
                     [o1.get_id()]
                 );
                 assert_eq!(
                     transaction
-                        .search(&vec![a.clone()], &vec![c.clone()], None)?
+                        .public_search(&vec![a.clone()], &vec![c.clone()], None)?
                         .collect::<Vec<_>>()?,
                     [o2.get_id(), o1.get_id()]
                 );
 
-                transaction.remove_tags_from_object(&o3, &vec![a.clone(), c.clone()])?;
+                transaction.public_remove_tags_from_object(&o3, &vec![a.clone(), c.clone()])?;
                 assert_eq!(
                     transaction
-                        .search(&vec![a.clone()], &vec![], None)?
+                        .public_search(&vec![a.clone()], &vec![], None)?
                         .collect::<Vec<_>>()?,
                     [o2.get_id(), o1.get_id()]
                 );
                 assert_eq!(
                     transaction
-                        .search(&vec![b.clone()], &vec![], None)?
+                        .public_search(&vec![b.clone()], &vec![], None)?
                         .collect::<Vec<_>>()?,
                     [o3.get_id(), o2.get_id()]
                 );
                 assert_eq!(
                     transaction
-                        .search(&vec![c.clone()], &vec![], None)?
+                        .public_search(&vec![c.clone()], &vec![], None)?
                         .collect::<Vec<_>>()?,
                     []
                 );
 
-                transaction.remove_object(&o2)?;
+                transaction.public_remove_object(&o2)?;
                 assert_eq!(
                     transaction
-                        .search(&vec![a.clone()], &vec![], None)?
+                        .public_search(&vec![a.clone()], &vec![], None)?
                         .collect::<Vec<_>>()?,
                     [o1.get_id()]
                 );
                 assert_eq!(
                     transaction
-                        .search(&vec![b.clone()], &vec![], None)?
+                        .public_search(&vec![b.clone()], &vec![], None)?
                         .collect::<Vec<_>>()?,
                     [o3.get_id()]
                 );
                 assert_eq!(
                     transaction
-                        .search(&vec![c.clone()], &vec![], None)?
+                        .public_search(&vec![c.clone()], &vec![], None)?
                         .collect::<Vec<_>>()?,
                     []
                 );
@@ -799,17 +857,17 @@ mod tests {
         index
             .lock_all_and_write(|transaction| {
                 for (object, tags) in object_to_tags.iter() {
-                    transaction.insert(&object, &tags)?;
+                    transaction.public_insert(&object, &tags)?;
                 }
                 for (object, tags) in object_to_tags.iter() {
                     for tag in tags.iter() {
-                        assert_eq!(transaction.has_tag(object, tag)?, true);
+                        assert_eq!(transaction.public_has_tag(object, tag)?, true);
                     }
                     let result_tags = BTreeSet::from_iter(
                         transaction
-                            .get_tags(object)?
+                            .public_get_tags(object)?
                             .iter()
-                            .map(|tag_id| transaction.get_source(tag_id).unwrap().unwrap()),
+                            .map(|tag_id| transaction.public_get_source(tag_id).unwrap().unwrap()),
                     );
                     let correct_tags = BTreeSet::from_iter(tags.iter().cloned());
                     assert_eq!(result_tags, correct_tags);
@@ -831,14 +889,14 @@ mod tests {
             .lock_all_writes_and_read(|transaction| {
                 for (tag, objects) in tag_to_objects.iter() {
                     for object in objects {
-                        assert_eq!(transaction.has_tag(object, tag)?, true);
-                        assert_eq!(transaction.has_object_with_tag(tag)?, true);
+                        assert_eq!(transaction.public_has_tag(object, tag)?, true);
+                        assert_eq!(transaction.public_has_object_with_tag(tag)?, true);
                     }
                     assert_eq!(
                         transaction
-                            .search(&vec![tag.clone()], &vec![], None)?
+                            .public_search(&vec![tag.clone()], &vec![], None)?
                             .map(|object_id| transaction
-                                .get_source(&object_id)?
+                                .public_get_source(&object_id)?
                                 .ok_or(anyhow!("No source for object id {object_id:?} found")))
                             .collect::<BTreeSet<_>>()?,
                         BTreeSet::from_iter(objects.iter().cloned())
@@ -850,10 +908,12 @@ mod tests {
                     let present_tags = tags.iter().take(2).cloned().collect::<Vec<_>>();
                     let result = BTreeSet::from_iter(
                         transaction
-                            .search(&present_tags, &vec![], None)?
+                            .public_search(&present_tags, &vec![], None)?
                             .collect::<Vec<_>>()?
                             .iter()
-                            .map(|object_id| transaction.get_source(object_id).unwrap().unwrap()),
+                            .map(|object_id| {
+                                transaction.public_get_source(object_id).unwrap().unwrap()
+                            }),
                     );
                     let correct = present_tags
                         .iter()
