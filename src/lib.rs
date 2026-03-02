@@ -35,7 +35,7 @@ macro_rules! define_index {
         $(
             $additional_schema_name:ident {
                 $($table_name:ident<$key_type:ty, $value_type:ty>),+ $(,)?
-            }
+            },
         )*
     } use {
         $($use_item:tt)*
