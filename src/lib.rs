@@ -52,12 +52,12 @@ macro_rules! define_index {
                     tag_to_objects_count<Id, u32>,
                     object_to_tags_count<Id, u32>,
                 },
-            )+
+            ),*
             $(
                 $additional_schema_name {
                     $( $table_name<$key_type, $value_type> ),*
                 },
-            )*
+            ),*
         } use {
             use $crate::Id;
             $($use_item)*
