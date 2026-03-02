@@ -34,8 +34,10 @@ macro_rules! define_index {
     ($index_name:ident($($schema_name:ident),+ $(,)?) {
         $(
             $additional_schema_name:ident {
-                $($table_name:ident<$key_type:ty, $value_type:ty>),+ $(,)?
-            },
+                $(
+                    $table_name:ident<$key_type:ty, $value_type:ty>
+                )*
+            }
         )*
     } use {
         $($use_item:tt)*
@@ -46,17 +48,19 @@ macro_rules! define_index {
         lawn::database::define_database!(lawn_database {
             $(
                 $schema_name {
-                    tag_and_object<(Id, Id), ()>,
-                    object_and_tag<(Id, Id), ()>,
-                    id_to_source<Id, Vec<u8>>,
-                    tag_to_objects_count<Id, u32>,
-                    object_to_tags_count<Id, u32>,
-                },
+                    tag_and_object<(Id, Id), ()>
+                    object_and_tag<(Id, Id), ()>
+                    id_to_source<Id, Vec<u8>>
+                    tag_to_objects_count<Id, u32>
+                    object_to_tags_count<Id, u32>
+                }
             )*
             $(
                 $additional_schema_name {
-                    $( $table_name<$key_type, $value_type> ),*
-                },
+                    $(
+                        $table_name<$key_type, $value_type>
+                    )*
+                }
             )*
         } use {
             use $crate::Id;

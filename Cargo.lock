@@ -364,7 +364,7 @@ dependencies = [
 [[package]]
 name = "lawn"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/lawn#4d233cd12e2bfaf68b494568cd91d21cd4e0d327"
+source = "git+https://github.com/mentalblood0/lawn#c8de941b5caceabdf94abea182847c7a6a06ff15"
 dependencies = [
  "anyhow",
  "bincode",
@@ -630,7 +630,7 @@ dependencies = [
 [[package]]
 name = "serde-saphyr"
 version = "0.0.21"
-source = "git+https://github.com/bourumir-wyngs/serde-saphyr#b46e1b7020f91e222da03bbcdf7588ae932f010e"
+source = "git+https://github.com/bourumir-wyngs/serde-saphyr#5d5184501b65f3b60cb7e808ee5129fb348a58a5"
 dependencies = [
  "ahash",
  "annotate-snippets",
