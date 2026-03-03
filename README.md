@@ -1,4 +1,4 @@
-# Dream
+# 🧶 dream
 
 [![tests](https://github.com/mentalblood0/dream/actions/workflows/tests.yml/badge.svg)](https://github.com/mentalblood0/dream/actions/workflows/tests.yml)
 
