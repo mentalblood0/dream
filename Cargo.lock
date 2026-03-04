@@ -364,7 +364,7 @@ dependencies = [
 [[package]]
 name = "lawn"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/lawn#c8de941b5caceabdf94abea182847c7a6a06ff15"
+source = "git+https://github.com/mentalblood0/lawn#1dab3e6cb9556432b07bb8a4294deeacad2cae20"
 dependencies = [
  "anyhow",
  "bincode",
@@ -515,9 +515,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.44"
+version = "1.0.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21b2ebcf727b7760c461f091f9f0f539b77b8e87f2fd88131e7f1b433b3cece4"
+checksum = "41f2619966050689382d2b44f664f4bc593e129785a36d6ee376ddf37259b924"
 dependencies = [
  "proc-macro2",
 ]
