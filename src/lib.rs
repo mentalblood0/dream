@@ -5,9 +5,12 @@ pub extern crate paste;
 pub extern crate serde;
 pub extern crate xxhash_rust;
 
+pub use lawn::bincode;
+
 #[derive(
     Clone, Default, PartialEq, PartialOrd, Debug, bincode::Encode, bincode::Decode, Eq, Ord, Hash,
 )]
+#[bincode(crate = "bincode")]
 pub struct Id {
     pub value: [u8; 16],
 }

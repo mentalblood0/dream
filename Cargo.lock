@@ -263,7 +263,6 @@ name = "dream"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bincode",
  "criterion",
  "fallible-iterator",
  "lawn",
@@ -364,7 +363,7 @@ dependencies = [
 [[package]]
 name = "lawn"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/lawn#f4bd25854a62e8eaa04ef8f713ce4d72e519fc80"
+source = "git+https://github.com/mentalblood0/lawn#9c24fc932a2c5f5fee4684fe170a126df5ae7ed8"
 dependencies = [
  "anyhow",
  "bincode",
