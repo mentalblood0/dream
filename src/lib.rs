@@ -34,7 +34,11 @@ impl Object {
 
 #[macro_export]
 macro_rules! define_index {
-    ($index_name:ident($($schema_name:ident),+ $(,)?) {
+    ($index_name:ident(
+        $(
+            $schema_name:ident
+        )*
+    ) {
         $(
             $additional_schema_name:ident {
                 $(
@@ -683,7 +687,9 @@ macro_rules! define_index {
     };
 }
 
-define_index!(test_index(public,) {
+define_index!(test_index(
+    public
+) {
 } use {
 });
 

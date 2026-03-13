@@ -1,14 +1,16 @@
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use fallible_iterator::FallibleIterator;
 use nanorand::{Rng, WyRand};
-use std::{fs, io::BufReader};
+use std::{collections::HashSet, fs, io::BufReader};
 
 use serde::{Deserialize, Serialize};
 
 extern crate dream;
 use dream::*;
 
-define_index!(test_index(public,) {
+define_index!(test_index(
+    public
+) {
 } use {
 });
 
@@ -43,11 +45,9 @@ fn criterion_benchmark(bencher_context: &mut Criterion) {
             for _ in 0..config.objects_count {
                 let mut object_value = vec![0u8; 16];
                 rng.fill(&mut object_value);
-                let mut tags = (0..config.object_tags_count)
+                let tags = (0..config.object_tags_count)
                     .map(|_| tags[rng.generate_range(0..tags.len())].clone())
-                    .collect::<Vec<_>>();
-                tags.sort();
-                tags.dedup();
+                    .collect::<HashSet<_>>();
                 transaction.public_insert(&Object::Raw(object_value), &tags)?;
             }
             Ok(())
@@ -65,12 +65,12 @@ fn criterion_benchmark(bencher_context: &mut Criterion) {
                             tags.iter()
                                 .take(search_tags_count)
                                 .cloned()
-                                .collect::<Vec<_>>()
+                                .collect::<HashSet<_>>()
                         },
                         |present_tags| {
                             index.lock_all_writes_and_read(|transaction| {
                                 transaction
-                                    .public_search(&present_tags, &vec![], None)?
+                                    .public_search(&present_tags, &[].into(), None)?
                                     .collect::<Vec<_>>()?;
                                 Ok(())
                             })
@@ -93,12 +93,12 @@ fn criterion_benchmark(bencher_context: &mut Criterion) {
                             tags.iter()
                                 .take(search_tags_count)
                                 .cloned()
-                                .collect::<Vec<_>>()
+                                .collect::<HashSet<_>>()
                         },
                         |present_tags| {
                             index.lock_all_writes_and_read(|transaction| {
                                 transaction
-                                    .public_search(&present_tags, &vec![], None)?
+                                    .public_search(&present_tags, &[].into(), None)?
                                     .collect::<Vec<_>>()?;
                                 Ok(())
                             })
