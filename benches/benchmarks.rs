@@ -1,7 +1,7 @@
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use fallible_iterator::FallibleIterator;
 use nanorand::{Rng, WyRand};
-use std::{collections::HashSet, fs, io::BufReader};
+use std::{fs, io::BufReader};
 
 use serde::{Deserialize, Serialize};
 
@@ -47,7 +47,7 @@ fn criterion_benchmark(bencher_context: &mut Criterion) {
                 rng.fill(&mut object_value);
                 let tags = (0..config.object_tags_count)
                     .map(|_| tags[rng.generate_range(0..tags.len())].clone())
-                    .collect::<HashSet<_>>();
+                    .collect::<Vec<_>>();
                 transaction.public_insert(&Object::Raw(object_value), &tags)?;
             }
             Ok(())
@@ -65,7 +65,7 @@ fn criterion_benchmark(bencher_context: &mut Criterion) {
                             tags.iter()
                                 .take(search_tags_count)
                                 .cloned()
-                                .collect::<HashSet<_>>()
+                                .collect::<Vec<_>>()
                         },
                         |present_tags| {
                             index.lock_all_writes_and_read(|transaction| {
@@ -93,7 +93,7 @@ fn criterion_benchmark(bencher_context: &mut Criterion) {
                             tags.iter()
                                 .take(search_tags_count)
                                 .cloned()
-                                .collect::<HashSet<_>>()
+                                .collect::<Vec<_>>()
                         },
                         |present_tags| {
                             index.lock_all_writes_and_read(|transaction| {

@@ -74,16 +74,15 @@ macro_rules! define_index {
             $($use_item)*
         });
 
-        use std::{collections::HashSet, ops::Deref};
-        use std::ops::Bound;
+        use std::ops::{Deref, Bound};
 
-        use $crate::paste::paste;
-        use $crate::anyhow::{Context, Result, Error, anyhow};
-        use $crate::fallible_iterator::FallibleIterator;
-        use $crate::serde::{Deserialize, Serialize};
-
-        use $crate::Object;
-        use $crate::Id;
+        use $crate::{
+            paste::paste,
+            anyhow::{Context, Result, Error, anyhow},
+            fallible_iterator::FallibleIterator,
+            serde::{Deserialize, Serialize},
+            Object, Id
+        };
 
         #[derive(Serialize, Deserialize, Debug, Clone)]
         pub struct IndexConfig {
@@ -151,13 +150,19 @@ macro_rules! define_index {
 
                         pub fn [<$schema_name _search>](
                             &self,
-                            present_tags: &HashSet<Object>,
-                            absent_tags: &HashSet<Object>,
+                            present_tags: &Vec<Object>,
+                            absent_tags: &Vec<Object>,
                             start_after_object: Option<Id>,
                         ) -> Result<Box<dyn FallibleIterator<Item = Id, Error = Error> + '_>> {
+                            let mut present_tags_deduplicated = present_tags.clone();
+                            present_tags_deduplicated.sort();
+                            present_tags_deduplicated.dedup();
+                            let mut absent_tags_deduplicated = absent_tags.clone();
+                            absent_tags_deduplicated.sort();
+                            absent_tags_deduplicated.dedup();
                             let absent_tags_ids = {
                                 let mut absent_tags_ids_and_objects_count: Vec<(Id, u32)> = Vec::new();
-                                for tag in absent_tags {
+                                for tag in absent_tags_deduplicated {
                                     let tag_id = tag.get_id();
                                     if let Some(tag_objects_count) = self
                                         .database_transaction
@@ -176,7 +181,7 @@ macro_rules! define_index {
                                     .map(|(tag, _)| tag)
                                     .collect::<Vec<_>>()
                             };
-                            Ok(match present_tags.len() {
+                            Ok(match present_tags_deduplicated.len() {
                                 0 => {
                                     let from_object = &start_after_object.clone().unwrap_or_default();
                                     Box::new(
@@ -205,7 +210,7 @@ macro_rules! define_index {
                                     )
                                 },
                                 1 => {
-                                    let search_tag_id = present_tags.iter().next().unwrap().get_id();
+                                    let search_tag_id = present_tags_deduplicated.iter().next().unwrap().get_id();
                                     let from_tag_and_object = &(
                                         search_tag_id.clone(),
                                         start_after_object.clone().unwrap_or_default(),
@@ -242,7 +247,7 @@ macro_rules! define_index {
                                     absent_tags_ids,
                                     present_tags_ids: {
                                         let mut present_tags_ids_and_objects_count: Vec<(Id, u32)> = Vec::new();
-                                        for tag in present_tags {
+                                        for tag in present_tags_deduplicated {
                                             let tag_id = tag.get_id();
                                             present_tags_ids_and_objects_count.push((
                                                 tag_id.clone(),
@@ -282,7 +287,10 @@ macro_rules! define_index {
 
             $(
                 paste! {
-                    pub fn [<$schema_name _insert>](&mut self, object: &Object, tags: &HashSet<Object>) -> Result<&mut Self> {
+                    pub fn [<$schema_name _insert>](&mut self, object: &Object, tags: &Vec<Object>) -> Result<&mut Self> {
+                        let mut tags_deduplicated = tags.clone();
+                        tags_deduplicated.sort();
+                        tags_deduplicated.dedup();
                         let object_id = object.get_id();
                         if let Object::Raw(raw) = object {
                             self.database_transaction
@@ -290,9 +298,9 @@ macro_rules! define_index {
                                 .id_to_source
                                 .insert(object_id.clone(), raw.clone());
                         }
-                        let existent_tags = HashSet::<Id>::from_iter(self.[<$schema_name _get_tags>](object).with_context(|| format!("Can not get tags for object {object:?}"))?.into_iter());
+                        let existent_tags = Vec::<Id>::from_iter(self.[<$schema_name _get_tags>](object).with_context(|| format!("Can not get tags for object {object:?}"))?.into_iter());
                         let mut tags_added = 0 as u32;
-                        for tag in tags {
+                        for tag in tags_deduplicated {
                             let tag_id = tag.get_id();
                             if existent_tags.contains(&tag_id) {
                                 continue;
@@ -385,8 +393,11 @@ macro_rules! define_index {
                     pub fn [<$schema_name _remove_tags_from_object>](
                         &mut self,
                         object: &Object,
-                        tags: &HashSet<Object>,
+                        tags: &Vec<Object>,
                     ) -> Result<&mut Self> {
+                        let mut tags_deduplicated = tags.clone();
+                        tags_deduplicated.sort();
+                        tags_deduplicated.dedup();
                         let object_id = object.get_id();
                         if self
                             .database_transaction
@@ -397,9 +408,9 @@ macro_rules! define_index {
                         {
                             return Ok(self);
                         }
-                        let tags_before_remove = HashSet::<Id>::from_iter(self.[<$schema_name _get_tags>](object).with_context(|| format!("Can not get tags for object {object:?}"))?.into_iter());
+                        let tags_before_remove = Vec::<Id>::from_iter(self.[<$schema_name _get_tags>](object).with_context(|| format!("Can not get tags for object {object:?}"))?.into_iter());
                         let mut tags_removed_from_object: u32 = 0;
-                        for tag in tags {
+                        for tag in tags_deduplicated {
                             let tag_id = tag.get_id();
                             if !tags_before_remove.contains(&tag_id) {
                                 continue;
