@@ -351,7 +351,7 @@ macro_rules! define_index {
                             return Ok(self);
                         }
                         if let Object::Raw(_) = object {
-                            self.database_transaction.$schema_name.id_to_source.remove(&object_id);
+                            self.database_transaction.$schema_name.id_to_source.remove(object_id.clone());
                         }
                         let from_object_and_tag = &(object_id.clone(), Id::default());
                         let object_and_tag_iterator = self
@@ -365,11 +365,11 @@ macro_rules! define_index {
                             self.database_transaction
                                 .$schema_name
                                 .tag_and_object
-                                .remove(&(current_tag_id.clone(), current_object_id.clone()));
+                                .remove((current_tag_id.clone(), current_object_id.clone()));
                             self.database_transaction
                                 .$schema_name
                                 .object_and_tag
-                                .remove(&(current_object_id, current_tag_id.clone()));
+                                .remove((current_object_id, current_tag_id.clone()));
                             let new_tag_objects_count = self
                                 .database_transaction
                                 .$schema_name
@@ -385,7 +385,7 @@ macro_rules! define_index {
                         self.database_transaction
                             .$schema_name
                             .object_to_tags_count
-                            .remove(&object_id);
+                            .remove(object_id);
 
                         Ok(self)
                     }
@@ -418,11 +418,11 @@ macro_rules! define_index {
                             self.database_transaction
                                 .$schema_name
                                 .tag_and_object
-                                .remove(&(tag_id.clone(), object_id.clone()));
+                                .remove((tag_id.clone(), object_id.clone()));
                             self.database_transaction
                                 .$schema_name
                                 .object_and_tag
-                                .remove(&(object_id.clone(), tag_id.clone()));
+                                .remove((object_id.clone(), tag_id.clone()));
                             let new_tag_objects_count = self
                                 .database_transaction
                                 .$schema_name
@@ -439,9 +439,9 @@ macro_rules! define_index {
                                 self.database_transaction
                                     .$schema_name
                                     .tag_to_objects_count
-                                    .remove(&tag_id);
+                                    .remove(tag_id.clone());
                                 if let Object::Raw(_) = tag {
-                                    self.database_transaction.$schema_name.id_to_source.remove(&tag_id);
+                                    self.database_transaction.$schema_name.id_to_source.remove(tag_id);
                                 }
                             }
                             tags_removed_from_object += 1;
@@ -450,9 +450,9 @@ macro_rules! define_index {
                             self.database_transaction
                                 .$schema_name
                                 .object_to_tags_count
-                                .remove(&object_id);
+                                .remove(object_id.clone());
                             if let Object::Raw(_) = object {
-                                self.database_transaction.$schema_name.id_to_source.remove(&object_id);
+                                self.database_transaction.$schema_name.id_to_source.remove(object_id);
                             }
                         } else {
                             self.database_transaction.$schema_name.object_to_tags_count.insert(
