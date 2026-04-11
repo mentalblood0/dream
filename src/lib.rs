@@ -927,6 +927,17 @@ mod tests {
                     );
                 }
 
+                let mut unrestricted_search_result = transaction
+                    .public_search(&vec![], &vec![], None)?
+                    .collect::<Vec<_>>()?;
+                unrestricted_search_result.sort();
+                let mut all_objects = object_to_tags
+                    .keys()
+                    .map(|object| object.get_id())
+                    .collect::<Vec<_>>();
+                all_objects.sort();
+                assert_eq!(unrestricted_search_result, all_objects);
+
                 for _ in 0..SEARCHES_COUNT {
                     rng.shuffle(&mut tags);
                     let present_tags = tags.iter().take(2).cloned().collect::<Vec<_>>();
