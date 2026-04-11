@@ -188,8 +188,7 @@ macro_rules! define_index {
                                         self.database_transaction
                                             .$schema_name
                                             .object_to_tags_count
-                                            .iter(Bound::Included(from_object), false).with_context(|| format!("Can not initiate iteration over object_to_tags_count table starting from key {from_object:?}"))?
-                                            .skip(if start_after_object.is_some() { 1 } else { 0 })
+                                            .iter(Bound::Excluded(from_object), false).with_context(|| format!("Can not initiate iteration over object_to_tags_count table starting from key {from_object:?}"))?
                                             .map(|(object_id, _)| Ok(object_id))
                                             .filter(move |object_id| {
                                                 fallible_iterator::convert(
@@ -219,8 +218,7 @@ macro_rules! define_index {
                                         self.database_transaction
                                             .$schema_name
                                             .tag_and_object
-                                            .iter(Bound::Included(from_tag_and_object), false).with_context(|| format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}"))?
-                                            .skip(if start_after_object.is_some() { 1 } else { 0 })
+                                            .iter(Bound::Excluded(from_tag_and_object), false).with_context(|| format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}"))?
                                             .map(|((tag_id, object_id), _)| Ok((tag_id, object_id)))
                                             .take_while(move |(tag_id, _)| Ok(tag_id == &search_tag_id))
                                             .map(|(_, object_id)| Ok(object_id))
@@ -927,16 +925,22 @@ mod tests {
                     );
                 }
 
-                let mut unrestricted_search_result = transaction
-                    .public_search(&vec![], &vec![], None)?
+                let mut nearly_unrestricted_search_result = transaction
+                    .public_search(
+                        &vec![],
+                        &vec![],
+                        Some(Id {
+                            value: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+                        }),
+                    )?
                     .collect::<Vec<_>>()?;
-                unrestricted_search_result.sort();
+                nearly_unrestricted_search_result.sort();
                 let mut all_objects = object_to_tags
                     .keys()
                     .map(|object| object.get_id())
                     .collect::<Vec<_>>();
                 all_objects.sort();
-                assert_eq!(unrestricted_search_result, all_objects);
+                assert_eq!(nearly_unrestricted_search_result, all_objects);
 
                 for _ in 0..SEARCHES_COUNT {
                     rng.shuffle(&mut tags);
