@@ -183,13 +183,14 @@ macro_rules! define_index {
                             };
                             Ok(match present_tags_deduplicated.len() {
                                 0 => {
-                                    let from_object = &start_after_object.clone().unwrap_or_default();
+                                    let from_object = start_after_object.clone().unwrap_or_default();
                                     Box::new(
                                         self.database_transaction
                                             .$schema_name
                                             .object_to_tags_count
-                                            .iter(Bound::Excluded(from_object), false).with_context(|| format!("Can not initiate iteration over object_to_tags_count table starting from key {from_object:?}"))?
+                                            .iter(Bound::Included(&from_object), false).with_context(|| format!("Can not initiate iteration over object_to_tags_count table starting from key {from_object:?}"))?
                                             .map(|(object_id, _)| Ok(object_id))
+                                            .filter(move |object_id| Ok(*object_id != from_object))
                                             .filter(move |object_id| {
                                                 fallible_iterator::convert(
                                                     absent_tags_ids
@@ -210,18 +211,16 @@ macro_rules! define_index {
                                 },
                                 1 => {
                                     let search_tag_id = present_tags_deduplicated.iter().next().unwrap().get_id();
-                                    let from_tag_and_object = &(
-                                        search_tag_id.clone(),
-                                        start_after_object.clone().unwrap_or_default(),
-                                    );
+                                    let from_tag_and_object = (search_tag_id.clone(), start_after_object.clone().unwrap_or_default());
                                     Box::new(
                                         self.database_transaction
                                             .$schema_name
                                             .tag_and_object
-                                            .iter(Bound::Excluded(from_tag_and_object), false).with_context(|| format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}"))?
+                                            .iter(Bound::Included(&from_tag_and_object), false).with_context(|| format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}"))?
                                             .map(|((tag_id, object_id), _)| Ok((tag_id, object_id)))
                                             .take_while(move |(tag_id, _)| Ok(tag_id == &search_tag_id))
                                             .map(|(_, object_id)| Ok(object_id))
+                                            .filter(move |object_id| Ok(*object_id != from_tag_and_object.1))
                                             .filter(move |object_id| {
                                                 fallible_iterator::convert(
                                                     absent_tags_ids
@@ -924,6 +923,17 @@ mod tests {
                         BTreeSet::from_iter(objects.iter().cloned())
                     );
                 }
+
+                let mut unrestricted_search_result = transaction
+                    .public_search(&vec![], &vec![], None)?
+                    .collect::<Vec<_>>()?;
+                unrestricted_search_result.sort();
+                let mut all_objects = object_to_tags
+                    .keys()
+                    .map(|object| object.get_id())
+                    .collect::<Vec<_>>();
+                all_objects.sort();
+                assert_eq!(unrestricted_search_result, all_objects);
 
                 let mut nearly_unrestricted_search_result = transaction
                     .public_search(
