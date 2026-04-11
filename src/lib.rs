@@ -190,7 +190,7 @@ macro_rules! define_index {
                                             .object_to_tags_count
                                             .iter(Bound::Included(&from_object), false).with_context(|| format!("Can not initiate iteration over object_to_tags_count table starting from key {from_object:?}"))?
                                             .map(|(object_id, _)| Ok(object_id))
-                                            .filter(move |object_id| Ok(*object_id != from_object))
+                                            .filter(move |object_id| Ok(start_after_object.is_none() || *object_id != from_object))
                                             .filter(move |object_id| {
                                                 fallible_iterator::convert(
                                                     absent_tags_ids
@@ -220,7 +220,7 @@ macro_rules! define_index {
                                             .map(|((tag_id, object_id), _)| Ok((tag_id, object_id)))
                                             .take_while(move |(tag_id, _)| Ok(tag_id == &search_tag_id))
                                             .map(|(_, object_id)| Ok(object_id))
-                                            .filter(move |object_id| Ok(*object_id != from_tag_and_object.1))
+                                            .filter(move |object_id| Ok(start_after_object.is_none() || *object_id != from_tag_and_object.1))
                                             .filter(move |object_id| {
                                                 fallible_iterator::convert(
                                                     absent_tags_ids
