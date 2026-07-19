@@ -213,7 +213,6 @@ macro_rules! define_index {
                         tags.sort();
                         tags.dedup();
                         for tag in tags {
-                            let start = std::time::Instant::now();
                             self.database_transaction
                                 .$schema_name
                                 .tag_and_object
@@ -222,8 +221,6 @@ macro_rules! define_index {
                                 .$schema_name
                                 .object_and_tag
                                 .insert((object.clone(), tag), ());
-                            let elapsed = start.elapsed();
-                            println!("object-tag insertion took {elapsed:?}");
                         }
                         self.database_transaction
                             .$schema_name
