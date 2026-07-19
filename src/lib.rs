@@ -10,7 +10,7 @@ pub use lawn::bincode;
     Clone, Default, PartialEq, PartialOrd, Debug, bincode::Encode, bincode::Decode, Eq, Ord, Hash,
 )]
 #[bincode(crate = "bincode")]
-pub struct Id([u8; 16]);
+pub struct Id(pub [u8; 16]);
 
 #[macro_export]
 macro_rules! define_index {
