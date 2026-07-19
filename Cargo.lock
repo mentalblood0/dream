@@ -267,7 +267,6 @@ dependencies = [
  "pretty_assertions",
  "serde",
  "serde-saphyr",
- "xxhash-rust",
 ]
 
 [[package]]
@@ -867,12 +866,6 @@ checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
 dependencies = [
  "windows-link",
 ]
-
-[[package]]
-name = "xxhash-rust"
-version = "0.8.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "985eec839aaf2a1270af8f4ebcf63cf9401cfd90f0902f97c28d9f104ffbde72"
 
 [[package]]
 name = "yansi"

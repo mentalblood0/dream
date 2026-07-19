@@ -6,10 +6,9 @@ edition = "2024"
 [dependencies]
 lawn = { git = "https://github.com/mentalblood0/lawn" }
 anyhow = { version = "1.0.100", features = ["std", "backtrace"] }
-xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 fallible-iterator = { version = "0.3", features = ["std"] }
 serde = { version = "1.0", features = ["derive"] }
-paste = {version = "1.0"}
+paste = { version = "1.0" }
 
 [dev-dependencies]
 nanorand = "0.8"
