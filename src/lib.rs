@@ -273,18 +273,12 @@ macro_rules! define_index {
                                 .object_and_tag
                                 .remove(&(object.clone(), tag));
                         }
-                        let object_and_tag_left = self.database_transaction
-                            .$schema_name
-                            .object_and_tag
-                            .iter(Bound::Included(&(object.clone(), Id::default())), false)?.next()?;
-                        if let Some(object_and_tag) = object_and_tag_left {
-                            if &object_and_tag.0.0 != object {
-                                self.database_transaction
-                                    .$schema_name
-                                    .object
-                                    .remove(object);
-                            }
-                        } else {
+                        if self.database_transaction
+                                .$schema_name
+                                .object_and_tag
+                                .iter(Bound::Included(&(object.clone(), Id::default())), false)?
+                                .take_while(|((object_left, _), _)| Ok(object_left == object))
+                                .next()?.is_none() {
                             self.database_transaction
                                 .$schema_name
                                 .object
