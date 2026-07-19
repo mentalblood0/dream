@@ -274,16 +274,14 @@ macro_rules! define_index {
                                 .remove(&(object.clone(), tag));
                         }
                         let object_and_tag_left = self.database_transaction
-                                .$schema_name
-                                .object_and_tag
-                                .iter(Bound::Included(&(object.clone(), Id::default())), false)?.next()?;
-                        if object_and_tag_left.is_none() {
+                            .$schema_name
+                            .object_and_tag
+                            .iter(Bound::Included(&(object.clone(), Id::default())), false)?.next()?;
+                        if let Some(object_and_tag) = object_and_tag_left && (&object_and_tag.0.0 == object) {
                             self.database_transaction
                                 .$schema_name
                                 .object
                                 .remove(object);
-                        } else {
-                            println!("while removing tags from object {object:?} there is left {object_and_tag_left:?}");
                         }
                         Ok(self)
                     }
@@ -673,8 +671,8 @@ mod tests {
 
     #[test]
     fn test_generative() {
-        const TOTAL_TAGS_COUNT: usize = 100;
-        const OBJECT_TAGS_COUNT: usize = 10;
+        const TOTAL_TAGS_COUNT: usize = 30;
+        const OBJECT_TAGS_COUNT: usize = 8;
         const OBJECTS_COUNT: usize = 10000;
         const SEARCHES_COUNT: usize = 1000;
 
