@@ -670,10 +670,10 @@ mod tests {
 
     #[test]
     fn test_generative() {
-        const TOTAL_TAGS_COUNT: usize = 8;
-        const OBJECT_TAGS_COUNT: usize = 3;
-        const OBJECTS_COUNT: usize = 100;
-        const SEARCHES_COUNT: usize = 100;
+        const TOTAL_TAGS_COUNT: usize = 100;
+        const OBJECT_TAGS_COUNT: usize = 10;
+        const OBJECTS_COUNT: usize = 10000;
+        const SEARCHES_COUNT: usize = 1000;
 
         let mut index = new_default_index("test_generative");
         let mut rng = WyRand::new_seed(0);
