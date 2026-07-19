@@ -150,14 +150,14 @@ macro_rules! define_index {
 
                         pub fn [<$schema_name _search>](
                             &self,
-                            present_tags: &Vec<Object>,
-                            absent_tags: &Vec<Object>,
+                            present_tags: &[Object],
+                            absent_tags: &[Object],
                             start_after_object: Option<Id>,
                         ) -> Result<Box<dyn FallibleIterator<Item = Id, Error = Error> + '_>> {
-                            let mut present_tags_deduplicated = present_tags.clone();
+                            let mut present_tags_deduplicated = present_tags.to_vec();
                             present_tags_deduplicated.sort();
                             present_tags_deduplicated.dedup();
-                            let mut absent_tags_deduplicated = absent_tags.clone();
+                            let mut absent_tags_deduplicated = absent_tags.to_vec();
                             absent_tags_deduplicated.sort();
                             absent_tags_deduplicated.dedup();
                             let absent_tags_ids = {
@@ -284,8 +284,8 @@ macro_rules! define_index {
 
             $(
                 paste! {
-                    pub fn [<$schema_name _insert>](&mut self, object: &Object, tags: &Vec<Object>) -> Result<&mut Self> {
-                        let mut tags_deduplicated = tags.clone();
+                    pub fn [<$schema_name _insert>](&mut self, object: &Object, tags: &[Object]) -> Result<&mut Self> {
+                        let mut tags_deduplicated = tags.to_vec();
                         tags_deduplicated.sort();
                         tags_deduplicated.dedup();
                         let object_id = object.get_id();
@@ -348,7 +348,7 @@ macro_rules! define_index {
                             return Ok(self);
                         }
                         if let Object::Raw(_) = object {
-                            self.database_transaction.$schema_name.id_to_source.remove(object_id.clone());
+                            self.database_transaction.$schema_name.id_to_source.remove(&object_id);
                         }
                         let from_object_and_tag = &(object_id.clone(), Id::default());
                         let object_and_tag_iterator = self
@@ -362,11 +362,11 @@ macro_rules! define_index {
                             self.database_transaction
                                 .$schema_name
                                 .tag_and_object
-                                .remove((current_tag_id.clone(), current_object_id.clone()));
+                                .remove(&(current_tag_id.clone(), current_object_id.clone()));
                             self.database_transaction
                                 .$schema_name
                                 .object_and_tag
-                                .remove((current_object_id, current_tag_id.clone()));
+                                .remove(&(current_object_id, current_tag_id.clone()));
                             let new_tag_objects_count = self
                                 .database_transaction
                                 .$schema_name
@@ -382,7 +382,7 @@ macro_rules! define_index {
                         self.database_transaction
                             .$schema_name
                             .object_to_tags_count
-                            .remove(object_id);
+                            .remove(&object_id);
 
                         Ok(self)
                     }
@@ -390,9 +390,9 @@ macro_rules! define_index {
                     pub fn [<$schema_name _remove_tags_from_object>](
                         &mut self,
                         object: &Object,
-                        tags: &Vec<Object>,
+                        tags: &[Object],
                     ) -> Result<&mut Self> {
-                        let mut tags_deduplicated = tags.clone();
+                        let mut tags_deduplicated = tags.to_vec();
                         tags_deduplicated.sort();
                         tags_deduplicated.dedup();
                         let object_id = object.get_id();
@@ -415,11 +415,11 @@ macro_rules! define_index {
                             self.database_transaction
                                 .$schema_name
                                 .tag_and_object
-                                .remove((tag_id.clone(), object_id.clone()));
+                                .remove(&(tag_id.clone(), object_id.clone()));
                             self.database_transaction
                                 .$schema_name
                                 .object_and_tag
-                                .remove((object_id.clone(), tag_id.clone()));
+                                .remove(&(object_id.clone(), tag_id.clone()));
                             let new_tag_objects_count = self
                                 .database_transaction
                                 .$schema_name
@@ -436,9 +436,9 @@ macro_rules! define_index {
                                 self.database_transaction
                                     .$schema_name
                                     .tag_to_objects_count
-                                    .remove(tag_id.clone());
+                                    .remove(&tag_id);
                                 if let Object::Raw(_) = tag {
-                                    self.database_transaction.$schema_name.id_to_source.remove(tag_id);
+                                    self.database_transaction.$schema_name.id_to_source.remove(&tag_id);
                                 }
                             }
                             tags_removed_from_object += 1;
@@ -447,9 +447,9 @@ macro_rules! define_index {
                             self.database_transaction
                                 .$schema_name
                                 .object_to_tags_count
-                                .remove(object_id.clone());
+                                .remove(&object_id);
                             if let Object::Raw(_) = object {
-                                self.database_transaction.$schema_name.id_to_source.remove(object_id);
+                                self.database_transaction.$schema_name.id_to_source.remove(&object_id);
                             }
                         } else {
                             self.database_transaction.$schema_name.object_to_tags_count.insert(
@@ -667,7 +667,7 @@ macro_rules! define_index {
                 })
             }
 
-            pub fn lock_all_and_write<'a, F, R>(&'a mut self, mut f: F) -> Result<R>
+            pub fn lock_all_and_write<F, R>(&mut self, mut f: F) -> Result<R>
             where
                 F: FnMut(&mut WriteTransaction<'_, '_>) -> Result<R>,
             {
@@ -738,85 +738,85 @@ mod tests {
         index
             .lock_all_and_write(|transaction| {
                 transaction
-                    .public_insert(&o1, &[a.clone()].into())
+                    .public_insert(&o1, std::slice::from_ref(&a))
                     .unwrap()
-                    .public_insert(&o2, &[a.clone(), b.clone()].into())
+                    .public_insert(&o2, &[a.clone(), b.clone()])
                     .unwrap()
-                    .public_insert(&o3, &[a.clone(), b.clone(), c.clone()].into())
+                    .public_insert(&o3, &[a.clone(), b.clone(), c.clone()])
                     .unwrap();
                 assert_eq!(
                     transaction
-                        .public_search(&[a.clone(), b.clone(), c.clone()].into(), &[].into(), None)?
+                        .public_search(&[a.clone(), b.clone(), c.clone()], &[], None)?
                         .collect::<Vec<_>>()?,
                     [o3.get_id()]
                 );
                 assert_eq!(
                     transaction
-                        .public_search(&[a.clone(), b.clone()].into(), &[].into(), None)?
+                        .public_search(&[a.clone(), b.clone()], &[], None)?
                         .collect::<Vec<_>>()?,
                     [o3.get_id(), o2.get_id()]
                 );
                 assert_eq!(
                     transaction
-                        .public_search(&[a.clone()].into(), &[].into(), None)?
+                        .public_search(std::slice::from_ref(&a), &[], None)?
                         .collect::<Vec<_>>()?,
                     [o3.get_id(), o2.get_id(), o1.get_id()]
                 );
 
                 assert_eq!(
                     transaction
-                        .public_search(&[a.clone()].into(), &[a.clone()].into(), None)?
+                        .public_search(std::slice::from_ref(&a), std::slice::from_ref(&a), None)?
                         .collect::<Vec<_>>()?,
                     []
                 );
                 assert_eq!(
                     transaction
-                        .public_search(&[a.clone()].into(), &[].into(), Some(o1.get_id()))?
+                        .public_search(std::slice::from_ref(&a), &[], Some(o1.get_id()))?
                         .collect::<Vec<_>>()?,
                     []
                 );
                 assert_eq!(
                     transaction
-                        .public_search(&[].into(), &[].into(), Some(o1.get_id()))?
+                        .public_search(&[], &[], Some(o1.get_id()))?
                         .collect::<Vec<_>>()?,
                     []
                 );
                 assert_eq!(
                     transaction
-                        .public_search(&[].into(), &[a.clone(), b.clone(), c.clone()].into(), None)?
+                        .public_search(&[], &[a.clone(), b.clone(), c.clone()], None)?
                         .collect::<Vec<_>>()?,
                     []
                 );
 
                 assert_eq!(
                     transaction
-                        .public_search(&[a.clone()].into(), &[b.clone()].into(), None)?
+                        .public_search(std::slice::from_ref(&a), std::slice::from_ref(&b), None)?
                         .collect::<Vec<_>>()?,
                     [o1.get_id()]
                 );
                 assert_eq!(
                     transaction
-                        .public_search(&[a.clone()].into(), &[c.clone()].into(), None)?
+                        .public_search(std::slice::from_ref(&a), std::slice::from_ref(&c), None)?
                         .collect::<Vec<_>>()?,
                     [o2.get_id(), o1.get_id()]
                 );
 
-                transaction.public_remove_tags_from_object(&o3, &[a.clone(), c.clone()].into())?;
+                transaction.public_remove_tags_from_object(&o3, &[a.clone(), c.clone()])?;
                 assert_eq!(
                     transaction
-                        .public_search(&[a.clone()].into(), &[].into(), None)?
+                        .public_search(std::slice::from_ref(&a), &[], None)?
                         .collect::<Vec<_>>()?,
                     [o2.get_id(), o1.get_id()]
                 );
                 assert_eq!(
                     transaction
-                        .public_search(&[b.clone()].into(), &[].into(), None)?
+                        .public_search(std::slice::from_ref(&b), &[], None)?
                         .collect::<Vec<_>>()?,
                     [o3.get_id(), o2.get_id()]
                 );
                 assert_eq!(
                     transaction
-                        .public_search(&[c.clone()].into(), &[].into(), None)?
+                        .public_search(std::slice::from_ref(&c), &[], None)?
                         .collect::<Vec<_>>()?,
                     []
                 );
@@ -824,19 +824,19 @@ mod tests {
                 transaction.public_remove_object(&o2)?;
                 assert_eq!(
                     transaction
-                        .public_search(&[a.clone()].into(), &[].into(), None)?
+                        .public_search(std::slice::from_ref(&a), &[], None)?
                         .collect::<Vec<_>>()?,
                     [o1.get_id()]
                 );
                 assert_eq!(
                     transaction
-                        .public_search(&[b.clone()].into(), &[].into(), None)?
+                        .public_search(std::slice::from_ref(&b), &[], None)?
                         .collect::<Vec<_>>()?,
                     [o3.get_id()]
                 );
                 assert_eq!(
                     transaction
-                        .public_search(&[c.clone()].into(), &[].into(), None)?
+                        .public_search(std::slice::from_ref(&c), &[], None)?
                         .collect::<Vec<_>>()?,
                     []
                 );
@@ -878,7 +878,7 @@ mod tests {
         index
             .lock_all_and_write(|transaction| {
                 for (object, tags) in object_to_tags.iter() {
-                    transaction.public_insert(&object, &tags.into_iter().cloned().collect())?;
+                    transaction.public_insert(object, tags)?;
                 }
                 for (object, tags) in object_to_tags.iter() {
                     for tag in tags.iter() {
@@ -915,7 +915,7 @@ mod tests {
                     }
                     assert_eq!(
                         transaction
-                            .public_search(&[tag.clone()].into(), &[].into(), None)?
+                            .public_search(std::slice::from_ref(tag), &[], None)?
                             .map(|object_id| transaction
                                 .public_get_source(&object_id)?
                                 .ok_or(anyhow!("No source for object id {object_id:?} found")))
@@ -925,7 +925,7 @@ mod tests {
                 }
 
                 let mut unrestricted_search_result = transaction
-                    .public_search(&vec![], &vec![], None)?
+                    .public_search(&[], &[], None)?
                     .collect::<Vec<_>>()?;
                 unrestricted_search_result.sort();
                 let mut all_objects = object_to_tags
@@ -937,8 +937,8 @@ mod tests {
 
                 let mut nearly_unrestricted_search_result = transaction
                     .public_search(
-                        &vec![],
-                        &vec![],
+                        &[],
+                        &[],
                         Some(Id {
                             value: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
                         }),
@@ -957,11 +957,7 @@ mod tests {
                     let present_tags = tags.iter().take(2).cloned().collect::<Vec<_>>();
                     let result = BTreeSet::from_iter(
                         transaction
-                            .public_search(
-                                &present_tags.iter().cloned().collect(),
-                                &[].into(),
-                                None,
-                            )?
+                            .public_search(&present_tags, &[], None)?
                             .collect::<Vec<_>>()?
                             .iter()
                             .map(|object_id| {
