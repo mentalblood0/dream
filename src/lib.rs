@@ -273,14 +273,17 @@ macro_rules! define_index {
                                 .object_and_tag
                                 .remove(&(object.clone(), tag));
                         }
-                        if self.database_transaction
+                        let object_and_tag_left = self.database_transaction
                                 .$schema_name
                                 .object_and_tag
-                                .iter(Bound::Included(&(object.clone(), Id::default())), false)?.next()?.is_none() {
+                                .iter(Bound::Included(&(object.clone(), Id::default())), false)?.next()?;
+                        if object_and_tag_left.is_none() {
                             self.database_transaction
                                 .$schema_name
                                 .object
                                 .remove(object);
+                        } else {
+                            println!("while removing tags from object {object:?} there is left {object_and_tag_left:?}");
                         }
                         Ok(self)
                     }
