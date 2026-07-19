@@ -38,3 +38,4 @@ database:
             container_size: 20
   log:
     path: /tmp/dream/test/TEST_NAME/log.dat
+    checkpoint_on_size: 8 GB
