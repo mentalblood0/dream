@@ -52,7 +52,10 @@ macro_rules! define_index {
             $($use_item)*
         });
 
-        use std::ops::{Deref, Bound};
+        use std::{
+            ops::{Deref, Bound},
+            borrow::Cow
+        };
 
         use $crate::{
             paste::paste,
@@ -100,7 +103,7 @@ macro_rules! define_index {
                                 .$schema_name
                                 .tag_and_object
                                 .iter(Bound::Included(from_tag_and_object), false).with_context(|| format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}"))?
-                                .take_while(|((current_tag_id, _), _)| Ok(*current_tag_id == from_tag_and_object.0))
+                                .take_while(|(key_cow, _)| Ok(key_cow.0 == from_tag_and_object.0))
                                 .next()?
                                 .is_some())
                         }
@@ -111,8 +114,8 @@ macro_rules! define_index {
                                 .$schema_name
                                 .object_and_tag
                                 .iter(Bound::Included(from_object_and_tag), false).with_context(|| format!("Can not initiate iteration over object_and_tag table starting from key {from_object_and_tag:?}"))?
-                                .take_while(|((current_object_id, _), _)| Ok(current_object_id == object))
-                                .map(|((_, current_tag_id), _)| Ok(current_tag_id))
+                                .take_while(|(key_cow, _)| Ok(&key_cow.0 == object))
+                                .map(|(key_cow, _)| Ok(std::mem::take(&mut key_cow.into_owned()).1))
                                 .collect::<Vec<_>>()
                         }
 
@@ -121,7 +124,7 @@ macro_rules! define_index {
                             present_tags: &[Id],
                             absent_tags: &[Id],
                             start_after_object: Option<Id>,
-                        ) -> Result<Box<dyn FallibleIterator<Item = Id, Error = Error> + '_>> {
+                        ) -> Result<Box<dyn FallibleIterator<Item = Cow<'_, Id>, Error = Error> + '_>> {
                             let mut present_tags = present_tags.to_vec();
                             present_tags.sort();
                             present_tags.dedup();
@@ -136,11 +139,11 @@ macro_rules! define_index {
                                             .$schema_name
                                             .object
                                             .iter(Bound::Included(&from_object), false).with_context(|| format!("Can not initiate iteration over object_to_tags_count table starting from key {from_object:?}"))?
-                                            .map(|(object_id, _)| Ok(object_id))
-                                            .filter(move |object_id| Ok(start_after_object.is_none() || *object_id != from_object))
+                                            .map(|(key_cow, _)| Ok(key_cow))
+                                            .filter(move |object_id| Ok(start_after_object.is_none() || *object_id.as_ref() != from_object))
                                             .filter(move |object_id| {
                                                 for absent_tag in absent_tags.iter() {
-                                                    let key = &(absent_tag.clone(), object_id.clone());
+                                                    let key = &(absent_tag.clone(), object_id.as_ref().clone());
                                                     if self
                                                         .database_transaction
                                                         .$schema_name
@@ -162,13 +165,16 @@ macro_rules! define_index {
                                             .$schema_name
                                             .tag_and_object
                                             .iter(Bound::Included(&from_tag_and_object), false).with_context(|| format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}"))?
-                                            .map(|((tag_id, object_id), _)| Ok((tag_id, object_id)))
+                                            .map(|(tag_id_and_object_id_cow, _)| {
+                                                let owned_cow = tag_id_and_object_id_cow.into_owned();
+                                                Ok((owned_cow.0, owned_cow.1))
+                                            })
                                             .take_while(move |(tag_id, _)| Ok(*tag_id == search_tag_id))
-                                            .map(|(_, object_id)| Ok(object_id))
-                                            .filter(move |object_id| Ok(start_after_object.is_none() || *object_id != from_tag_and_object.1))
-                                            .filter(move |object_id| {
+                                            .map(|(_, object_id)| Ok(Cow::Owned(object_id)))
+                                            .filter(move |object_id| Ok(start_after_object.is_none() || **object_id != from_tag_and_object.1))
+                                            .filter(move |object_id: &Cow<'_, Id>| {
                                                 for absent_tag in absent_tags.iter() {
-                                                    let key = &(absent_tag.clone(), object_id.clone());
+                                                    let key = &(absent_tag.clone(), object_id.as_ref().clone());
                                                     if self
                                                         .database_transaction
                                                         .$schema_name
@@ -236,7 +242,8 @@ macro_rules! define_index {
                             .$schema_name
                             .object_and_tag
                             .iter(Bound::Included(from_object_and_tag), false).with_context(|| format!("Can not initiate iteration over object_and_tag table starting from key {from_object_and_tag:?}"))?
-                            .take_while(|((current_object_id, _), _)| Ok(current_object_id == object))
+                            .take_while(|(key_cow, _)| Ok(&key_cow.0 == object))
+                            .map(|(key_cow, value_cow)| Ok((key_cow.into_owned(), value_cow.into_owned())))
                             .collect::<Vec<_>>().with_context(|| format!("Can not collect from iteration over object_and_tag table starting from key {from_object_and_tag:?} taking while object id is {object:?}"))?;
                         for ((current_object_id, current_tag_id), _) in object_and_tag_iterator {
                             self.database_transaction
@@ -277,7 +284,7 @@ macro_rules! define_index {
                                 .$schema_name
                                 .object_and_tag
                                 .iter(Bound::Included(&(object.clone(), Id::default())), false)?
-                                .take_while(|((object_left, _), _)| Ok(object_left == object))
+                                .take_while(|(key_cow, _)| Ok(&key_cow.0 == object))
                                 .next()?.is_none() {
                             self.database_transaction
                                 .$schema_name
@@ -293,13 +300,13 @@ macro_rules! define_index {
         $(
             paste! {
                 struct [<$schema_name:camel Cursor>]<'a> {
-                    iterator: Box<dyn FallibleIterator<Item = ((Id, Id), ()), Error = Error> + 'a>,
-                    current_value: Option<(Id, Id)>,
+                    iterator: Box<dyn FallibleIterator<Item = ((Cow<'a, Id>, Cow<'a, Id>), ()), Error = Error> + 'a>,
+                    current_value: Option<(Cow<'a, Id>, Cow<'a, Id>)>,
                 }
 
                 impl<'a> [<$schema_name:camel Cursor>]<'a> {
                     fn new(
-                        mut iterator: Box<dyn FallibleIterator<Item = ((Id, Id), ()), Error = Error> + 'a>,
+                        mut iterator: Box<dyn FallibleIterator<Item = ((Cow<'a, Id>, Cow<'a, Id>), ()), Error = Error> + 'a>,
                     ) -> Result<Self> {
                         let current_value = iterator
                             .next().with_context(|| "Can not get first value from iterator")?
@@ -331,7 +338,7 @@ macro_rules! define_index {
                 }
 
                 impl<'a> FallibleIterator for [<$schema_name:camel SearchIterator>]<'a> {
-                    type Item = Id;
+                    type Item = Cow<'a, Id>;
                     type Error = Error;
 
                     fn next(&mut self) -> Result<Option<Self::Item>, Self::Error> {
@@ -353,7 +360,7 @@ macro_rules! define_index {
                                             .map(|id| Result::<Id>::Ok(id.clone())),
                                     )
                                     .all(|tag_id| {
-                                        let key = &(tag_id.clone(), first_cursor_object.clone());
+                                        let key = &(tag_id.clone(), first_cursor_object.as_ref().clone());
                                         Ok(self
                                             .database_transaction
                                             .$schema_name
@@ -370,7 +377,7 @@ macro_rules! define_index {
                                         .current_value
                                         .as_ref()
                                         .is_some_and(|first_cursor_value| {
-                                            first_cursor_value.0 == self.present_tags_ids[0]
+                                            first_cursor_value.0.as_ref() == &self.present_tags_ids[0]
                                         })
                                     {
                                         self.end = true;
@@ -391,13 +398,30 @@ macro_rules! define_index {
                                             .last()
                                             .unwrap()
                                             .current_value
-                                            .clone()
+                                            .as_ref()
                                             .unwrap()
                                             .1
+                                            .as_ref()
+                                            .clone()
                                     },
                                 );
                                 let mut cursor =
-                                    [<$schema_name:camel Cursor>]::new(self.database_transaction.$schema_name.tag_and_object.iter(Bound::Included(from_tag_and_object), false).with_context(|| format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}"))?)?;
+                                    [<$schema_name:camel Cursor>]::new(
+                                        Box::new(
+                                            self.database_transaction
+                                                .$schema_name
+                                                .tag_and_object
+                                                .iter(
+                                                    Bound::Included(from_tag_and_object),
+                                                    false
+                                                ).with_context(
+                                                    || format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}")
+                                                )?.map(|cow| {
+                                                    let owned_cow = cow.0.into_owned();
+                                                    Ok(((Cow::Owned(owned_cow.0), Cow::Owned(owned_cow.1)), ()))
+                                                })
+                                        )
+                                )?;
                                 if self.index_1 == 0 && self.start_after_object.is_some() {
                                     cursor.next().with_context(|| format!("Can not propagate newely created cursor further (even getting nothing) to skip current entry as start_after_object {:?} is provided", self.start_after_object))?;
                                 }
@@ -405,7 +429,7 @@ macro_rules! define_index {
                                     .current_value
                                     .as_ref()
                                     .is_some_and(|first_cursor_value| {
-                                        first_cursor_value.0 == self.present_tags_ids[self.index_1]
+                                        first_cursor_value.0.as_ref() == &self.present_tags_ids[self.index_1]
                                     })
                                 {
                                     self.end = true;
@@ -425,16 +449,30 @@ macro_rules! define_index {
                                         .current_value
                                         .clone()
                                         .unwrap()
-                                        .1,
+                                        .1
+                                        .into_owned(),
                                 );
                                 let cursor = [<$schema_name:camel Cursor>]::new(
-                                    self.database_transaction.$schema_name.tag_and_object.iter(Bound::Included(from_tag_and_object), false).with_context(|| format!("Can not initiate iteration over tag_and_object table starting with key {from_tag_and_object:?}"))?,
+                                    Box::new(
+                                        self.database_transaction
+                                            .$schema_name
+                                            .tag_and_object
+                                            .iter(
+                                                Bound::Included(from_tag_and_object),
+                                                false
+                                            ).with_context(
+                                                || format!("Can not initiate iteration over tag_and_object table starting with key {from_tag_and_object:?}")
+                                            )?.map(|cow| {
+                                                let owned_cow = cow.0.into_owned();
+                                                Ok(((Cow::Owned(owned_cow.0), Cow::Owned(owned_cow.1)), ()))
+                                            }),
+                                    )
                                 )?;
                                 if !cursor
                                     .current_value
                                     .as_ref()
                                     .is_some_and(|first_cursor_value| {
-                                        first_cursor_value.0 == self.present_tags_ids[self.index_2]
+                                        first_cursor_value.0.as_ref() == &self.present_tags_ids[self.index_2]
                                     })
                                 {
                                     self.end = true;
@@ -451,7 +489,7 @@ macro_rules! define_index {
                                     .current_value
                                     .as_ref()
                                     .is_some_and(|current_value| {
-                                        current_value.0 == self.present_tags_ids[self.index_2]
+                                        current_value.0.as_ref() == &self.present_tags_ids[self.index_2]
                                     })
                                 {
                                     self.end = true;
@@ -471,7 +509,7 @@ macro_rules! define_index {
                                     if !self.cursors[0]
                                         .current_value
                                         .as_ref()
-                                        .is_some_and(|current_value| current_value.0 == self.present_tags_ids[0])
+                                        .is_some_and(|current_value| current_value.0.as_ref() == &self.present_tags_ids[0])
                                     {
                                         self.end = true;
                                         return Ok(None);
@@ -531,7 +569,10 @@ define_index!(test_index(
 mod tests {
     use super::*;
 
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::{
+        borrow::Cow,
+        collections::{BTreeMap, BTreeSet},
+    };
 
     use fallible_iterator::FallibleIterator;
     use nanorand::{Rng, WyRand};
@@ -573,19 +614,19 @@ mod tests {
                     transaction
                         .public_search(&[t1.clone(), t2.clone(), t3.clone()], &[], None)?
                         .collect::<Vec<_>>()?,
-                    std::slice::from_ref(&o3)
+                    [Cow::Borrowed(&o3)]
                 );
                 assert_eq!(
                     transaction
                         .public_search(&[t1.clone(), t2.clone()], &[], None)?
                         .collect::<Vec<_>>()?,
-                    [o2.clone(), o3.clone()]
+                    [Cow::Borrowed(&o2), Cow::Borrowed(&o3)]
                 );
                 assert_eq!(
                     transaction
                         .public_search(std::slice::from_ref(&t1), &[], None)?
                         .collect::<Vec<_>>()?,
-                    [o1.clone(), o2.clone(), o3.clone()]
+                    [Cow::Borrowed(&o1), Cow::Borrowed(&o2), Cow::Borrowed(&o3)]
                 );
 
                 assert_eq!(
@@ -617,13 +658,13 @@ mod tests {
                     transaction
                         .public_search(std::slice::from_ref(&t1), std::slice::from_ref(&t2), None)?
                         .collect::<Vec<_>>()?,
-                    std::slice::from_ref(&o1)
+                    [Cow::Borrowed(&o1)]
                 );
                 assert_eq!(
                     transaction
                         .public_search(std::slice::from_ref(&t1), std::slice::from_ref(&t3), None)?
                         .collect::<Vec<_>>()?,
-                    [o1.clone(), o2.clone()]
+                    [Cow::Borrowed(&o1), Cow::Borrowed(&o2)]
                 );
 
                 transaction.public_remove_tags_from_object(&o3, &[t1.clone(), t3.clone()])?;
@@ -631,13 +672,13 @@ mod tests {
                     transaction
                         .public_search(std::slice::from_ref(&t1), &[], None)?
                         .collect::<Vec<_>>()?,
-                    [o1.clone(), o2.clone()]
+                    [Cow::Borrowed(&o1), Cow::Borrowed(&o2)]
                 );
                 assert_eq!(
                     transaction
                         .public_search(std::slice::from_ref(&t2), &[], None)?
                         .collect::<Vec<_>>()?,
-                    [o2.clone(), o3.clone()]
+                    [Cow::Borrowed(&o2), Cow::Borrowed(&o3)]
                 );
                 assert_eq!(
                     transaction
@@ -651,13 +692,13 @@ mod tests {
                     transaction
                         .public_search(std::slice::from_ref(&t1), &[], None)?
                         .collect::<Vec<_>>()?,
-                    std::slice::from_ref(&o1)
+                    [Cow::Borrowed(&o1)]
                 );
                 assert_eq!(
                     transaction
                         .public_search(std::slice::from_ref(&t2), &[], None)?
                         .collect::<Vec<_>>()?,
-                    std::slice::from_ref(&o3)
+                    [Cow::Borrowed(&o3)]
                 );
                 assert_eq!(
                     transaction
@@ -737,7 +778,7 @@ mod tests {
                         transaction
                             .public_search(std::slice::from_ref(tag), &[], None)?
                             .collect::<BTreeSet<_>>()?,
-                        BTreeSet::from_iter(objects.iter().cloned())
+                        BTreeSet::from_iter(objects.iter().cloned().map(Cow::Owned))
                     );
                 }
 
@@ -745,7 +786,7 @@ mod tests {
                     .public_search(&[], &[], None)?
                     .collect::<Vec<_>>()?;
                 unrestricted_search_result.sort();
-                let mut all_objects = object_to_tags.keys().cloned().collect::<Vec<_>>();
+                let mut all_objects = object_to_tags.keys().map(Cow::Borrowed).collect::<Vec<_>>();
                 all_objects.sort();
                 assert_eq!(unrestricted_search_result, all_objects);
 
@@ -757,7 +798,7 @@ mod tests {
                     )?
                     .collect::<Vec<_>>()?;
                 nearly_unrestricted_search_result.sort();
-                let mut all_objects = object_to_tags.keys().cloned().collect::<Vec<_>>();
+                let mut all_objects = object_to_tags.keys().map(Cow::Borrowed).collect::<Vec<_>>();
                 all_objects.sort();
                 assert_eq!(nearly_unrestricted_search_result, all_objects);
 
@@ -767,12 +808,19 @@ mod tests {
                     let result = BTreeSet::from_iter(
                         transaction
                             .public_search(&present_tags, &[], None)?
-                            .collect::<Vec<_>>()?,
+                            .unwrap(),
                     );
                     let correct = present_tags
                         .iter()
                         .map(|tag| {
-                            BTreeSet::from_iter(tag_to_objects.get(tag).unwrap_or(&vec![]).clone())
+                            BTreeSet::from_iter(
+                                tag_to_objects
+                                    .get(tag)
+                                    .cloned()
+                                    .unwrap_or(vec![])
+                                    .into_iter()
+                                    .map(Cow::Owned),
+                            )
                         })
                         .reduce(|accumulator, current| {
                             accumulator
