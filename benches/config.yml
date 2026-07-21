@@ -7,41 +7,28 @@ benchmark_on_disk: true
 index:
   database:
     log:
-      path: /home/mentalblood/dream/benchmark/log.dat
+      path: /tmp/dream/benchmark/log.dat
+      checkpoint_on_size: 8 GB
     schemas:
       public:
         tag_and_object:
           index:
-            path: /home/mentalblood/dream/benchmark/tables/tag_and_object/index.idx
+            path: /tmp/dream/benchmark/tables/tag_and_object/index.idx
           data_pool:
             fixed:
-              path: /home/mentalblood/dream/benchmark/tables/tag_and_object/data.dat
+              path: /tmp/dream/benchmark/tables/tag_and_object/data.dat
               container_size: 32
         object_and_tag:
           index:
-            path: /home/mentalblood/dream/benchmark/tables/object_and_tag/index.idx
+            path: /tmp/dream/benchmark/tables/object_and_tag/index.idx
           data_pool:
             fixed:
-              path: /home/mentalblood/dream/benchmark/tables/object_and_tag/data.dat
+              path: /tmp/dream/benchmark/tables/object_and_tag/data.dat
               container_size: 32
-        id_to_source:
+        object:
           index:
-            path: /home/mentalblood/dream/benchmark/tables/id_to_source/index.idx
-          data_pool:
-            variable:
-              directory: /home/mentalblood/dream/benchmark/tables/id_to_source/data
-              max_element_size: 65536
-        tag_to_objects_count:
-          index:
-            path: /home/mentalblood/dream/benchmark/tables/tag_to_objects_count/index.idx
+            path: /tmp/dream/benchmark/tables/object_to_tags_count/index.idx
           data_pool:
             fixed:
-              path: /home/mentalblood/dream/benchmark/tables/tag_to_objects_count/data.dat
-              container_size: 20
-        object_to_tags_count:
-          index:
-            path: /home/mentalblood/dream/benchmark/tables/object_to_tags_count/index.idx
-          data_pool:
-            fixed:
-              path: /home/mentalblood/dream/benchmark/tables/object_to_tags_count/data.dat
-              container_size: 20
+              path: /tmp/dream/benchmark/tables/object_to_tags_count/data.dat
+              container_size: 16

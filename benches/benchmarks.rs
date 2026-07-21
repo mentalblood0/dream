@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use fallible_iterator::FallibleIterator;
 use nanorand::{Rng, WyRand};
 use std::{fs, io::BufReader};
@@ -35,20 +35,20 @@ fn criterion_benchmark(bencher_context: &mut Criterion) {
     let mut rng = WyRand::new_seed(config.rng_seed);
     let mut tags = (0..config.total_tags_count)
         .map(|_| {
-            let mut tag = vec![0u8; 16];
+            let mut tag = [0u8; 16];
             rng.fill(&mut tag);
-            Object::Raw(tag)
+            Id(tag)
         })
         .collect::<Vec<_>>();
     index
         .lock_all_and_write(|transaction| {
             for _ in 0..config.objects_count {
-                let mut object_value = vec![0u8; 16];
+                let mut object_value = [0u8; 16];
                 rng.fill(&mut object_value);
                 let tags = (0..config.object_tags_count)
                     .map(|_| tags[rng.generate_range(0..tags.len())].clone())
                     .collect::<Vec<_>>();
-                transaction.public_insert(&Object::Raw(object_value), &tags)?;
+                transaction.public_insert(&Id(object_value), &tags)?;
             }
             Ok(())
         })
@@ -70,7 +70,7 @@ fn criterion_benchmark(bencher_context: &mut Criterion) {
                         |present_tags| {
                             index.lock_all_writes_and_read(|transaction| {
                                 transaction
-                                    .public_search(&present_tags, &[].into(), None)?
+                                    .public_search(&present_tags, &[], None)?
                                     .collect::<Vec<_>>()?;
                                 Ok(())
                             })
@@ -82,7 +82,7 @@ fn criterion_benchmark(bencher_context: &mut Criterion) {
         }
     }
     if config.benchmark_on_disk {
-        index.database.lock_all_and_checkpoint().unwrap();
+        index.database.lock_all_and_checkpoint(false).unwrap();
         for search_tags_count in 1..=4 {
             bencher_context.bench_function(
                 format!("on-disk: searching all objects by {search_tags_count} tags").as_str(),
@@ -98,7 +98,7 @@ fn criterion_benchmark(bencher_context: &mut Criterion) {
                         |present_tags| {
                             index.lock_all_writes_and_read(|transaction| {
                                 transaction
-                                    .public_search(&present_tags, &[].into(), None)?
+                                    .public_search(&present_tags, &[], None)?
                                     .collect::<Vec<_>>()?;
                                 Ok(())
                             })
