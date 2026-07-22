@@ -224,10 +224,12 @@ macro_rules! define_index {
                                     .insert((object.clone(), tag.clone()), ());
                             }
                         }
-                        self.database_transaction
-                            .$schema_name
-                            .object
-                            .insert(object.clone(), ());
+                        if !self.index_config.maintain_only_tag_and_object_table {
+                            self.database_transaction
+                                .$schema_name
+                                .object
+                                .insert(object.clone(), ());
+                        }
                         Ok(self)
                     }
 
@@ -244,10 +246,12 @@ macro_rules! define_index {
                                     .remove(&(object.clone(), tag.clone()));
                             }
                         }
-                        self.database_transaction
-                            .$schema_name
-                            .object
-                            .remove(object);
+                        if !self.index_config.maintain_only_tag_and_object_table {
+                            self.database_transaction
+                                .$schema_name
+                                .object
+                                .remove(object);
+                        }
                         Ok(self)
                     }
 
