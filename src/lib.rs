@@ -85,12 +85,10 @@ macro_rules! define_index {
                     paste! {
                         pub fn [<$schema_name _has_tag>](&self, object: &Id, tag: &Id) -> Result<bool> {
                             let key = &(object.clone(), tag.clone());
-                            Ok(self
-                                .database_transaction
+                            self.database_transaction
                                 .$schema_name
                                 .object_and_tag
-                                .get(key).with_context(|| format!("Can not verify if key {key:?} exists in object_and_tag table"))?
-                                .is_some())
+                                .exists(key).with_context(|| format!("Can not verify if key {key:?} exists in object_and_tag table"))
                         }
 
                         pub fn [<$schema_name _has_object_with_tag>](&self, tag: &Id) -> Result<bool> {
@@ -135,9 +133,15 @@ macro_rules! define_index {
                                         self.database_transaction
                                             .$schema_name
                                             .object
-                                            .iter(Bound::Included(&from_object), false).with_context(|| format!("Can not initiate iteration over object_to_tags_count table starting from key {from_object:?}"))?
+                                            .iter(
+                                                if let Some(start_after_object) = &start_after_object {
+                                                    Bound::Excluded(start_after_object)
+                                                } else {
+                                                    Bound::Unbounded
+                                                },
+                                                false
+                                            ).with_context(|| format!("Can not initiate iteration over object_to_tags_count table starting from key {from_object:?}"))?
                                             .map(|(object_id, _)| Ok(object_id))
-                                            .filter(move |object_id| Ok(start_after_object.is_none() || *object_id != from_object))
                                             .filter(move |object_id| {
                                                 for absent_tag in absent_tags.iter() {
                                                     let key = &(absent_tag.clone(), object_id.clone());
@@ -145,8 +149,8 @@ macro_rules! define_index {
                                                         .database_transaction
                                                         .$schema_name
                                                         .tag_and_object
-                                                        .get(key).with_context(|| format!("Can not verify if key {key:?} exists in tag_and_object table"))?
-                                                        .is_some() {
+                                                        .exists(key).with_context(|| format!("Can not verify if key {key:?} exists in tag_and_object table"))?
+                                                    {
                                                         return Ok(false)
                                                     }
                                                 }
@@ -173,8 +177,8 @@ macro_rules! define_index {
                                                         .database_transaction
                                                         .$schema_name
                                                         .tag_and_object
-                                                        .get(key).with_context(|| format!("Can not verify if key {key:?} exists in tag_and_object table"))?
-                                                        .is_some() {
+                                                        .exists(key).with_context(|| format!("Can not verify if key {key:?} exists in tag_and_object table"))?
+                                                    {
                                                         return Ok(false)
                                                     }
                                                 }
@@ -354,12 +358,10 @@ macro_rules! define_index {
                                     )
                                     .all(|tag_id| {
                                         let key = &(tag_id.clone(), first_cursor_object.clone());
-                                        Ok(self
-                                            .database_transaction
+                                        self.database_transaction
                                             .$schema_name
                                             .tag_and_object
-                                            .get(key).with_context(|| format!("Can not verify if key {key:?} exists in tag_and_object table"))?
-                                            .is_none())
+                                            .exists(key).with_context(|| format!("Can not verify if key {key:?} exists in tag_and_object table"))
                                     })? {
                                         Some(first_cursor_object)
                                     } else {
