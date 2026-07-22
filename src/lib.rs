@@ -120,15 +120,10 @@ macro_rules! define_index {
                             absent_tags: &[Id],
                             start_after_object: Option<Id>,
                         ) -> Result<Box<dyn FallibleIterator<Item = Id, Error = Error> + '_>> {
-                            let mut present_tags = present_tags.to_vec();
-                            present_tags.sort();
-                            present_tags.dedup();
-                            let mut absent_tags = absent_tags.to_vec();
-                            absent_tags.sort();
-                            absent_tags.dedup();
                             Ok(match present_tags.len() {
                                 0 => {
                                     let from_object = start_after_object.clone().unwrap_or_default();
+                                    let absent_tags = absent_tags.to_vec();
                                     Box::new(
                                         self.database_transaction
                                             .$schema_name
@@ -159,15 +154,16 @@ macro_rules! define_index {
                                     )
                                 },
                                 1 => {
-                                    let search_tag_id = present_tags.into_iter().next().unwrap();
+                                    let search_tag_id = present_tags.into_iter().next().unwrap().clone();
                                     let from_tag_and_object = (search_tag_id.clone(), start_after_object.clone().unwrap_or_default());
+                                    let absent_tags = absent_tags.to_vec();
                                     Box::new(
                                         self.database_transaction
                                             .$schema_name
                                             .tag_and_object
                                             .iter(Bound::Included(&from_tag_and_object), false).with_context(|| format!("Can not initiate iteration over tag_and_object table starting from key {from_tag_and_object:?}"))?
                                             .map(|((tag_id, object_id), _)| Ok((tag_id, object_id)))
-                                            .take_while(move |(tag_id, _)| Ok(*tag_id == search_tag_id))
+                                            .take_while(move |(tag_id, _)| Ok(tag_id == &search_tag_id))
                                             .map(|(_, object_id)| Ok(object_id))
                                             .filter(move |object_id| Ok(start_after_object.is_none() || *object_id != from_tag_and_object.1))
                                             .filter(move |object_id| {
@@ -188,8 +184,8 @@ macro_rules! define_index {
                                 }
                                 2.. => Box::new([<$schema_name:camel SearchIterator>] {
                                     database_transaction: self.database_transaction.deref(),
-                                    absent_tags_ids: absent_tags,
-                                    present_tags_ids: present_tags,
+                                    absent_tags_ids: absent_tags.to_vec(),
+                                    present_tags_ids: present_tags.to_vec(),
                                     start_after_object,
                                     cursors: Vec::new(),
                                     index_1: 0 as usize,
@@ -213,9 +209,6 @@ macro_rules! define_index {
             $(
                 paste! {
                     pub fn [<$schema_name _insert>](&mut self, object: &Id, tags: &[Id]) -> Result<&mut Self> {
-                        let mut tags = tags.to_vec();
-                        tags.sort();
-                        tags.dedup();
                         for tag in tags {
                             self.database_transaction
                                 .$schema_name
@@ -224,7 +217,7 @@ macro_rules! define_index {
                             self.database_transaction
                                 .$schema_name
                                 .object_and_tag
-                                .insert((object.clone(), tag), ());
+                                .insert((object.clone(), tag.clone()), ());
                         }
                         self.database_transaction
                             .$schema_name
@@ -264,9 +257,6 @@ macro_rules! define_index {
                         object: &Id,
                         tags: &[Id],
                     ) -> Result<&mut Self> {
-                        let mut tags = tags.to_vec();
-                        tags.sort();
-                        tags.dedup();
                         for tag in tags {
                             self.database_transaction
                                 .$schema_name
@@ -275,7 +265,7 @@ macro_rules! define_index {
                             self.database_transaction
                                 .$schema_name
                                 .object_and_tag
-                                .remove(&(object.clone(), tag));
+                                .remove(&(object.clone(), tag.clone()));
                         }
                         if self.database_transaction
                                 .$schema_name
