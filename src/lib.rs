@@ -227,23 +227,15 @@ macro_rules! define_index {
                     }
 
                     pub fn [<$schema_name _remove_object>](&mut self, object: &Id) -> Result<&mut Self> {
-                        let from_object_and_tag = &(object.clone(), Id::default());
-                        let object_and_tag_iterator = self
-                            .database_transaction
-                            .$schema_name
-                            .object_and_tag
-                            .iter(Bound::Included(from_object_and_tag), false).with_context(|| format!("Can not initiate iteration over object_and_tag table starting from key {from_object_and_tag:?}"))?
-                            .take_while(|((current_object_id, _), _)| Ok(current_object_id == object))
-                            .collect::<Vec<_>>().with_context(|| format!("Can not collect from iteration over object_and_tag table starting from key {from_object_and_tag:?} taking while object id is {object:?}"))?;
-                        for ((current_object_id, current_tag_id), _) in object_and_tag_iterator {
+                        for tag in self.[<$schema_name _get_tags>](object)? {
                             self.database_transaction
                                 .$schema_name
                                 .tag_and_object
-                                .remove(&(current_tag_id.clone(), current_object_id.clone()));
+                                .remove(&(tag.clone(), object.clone()));
                             self.database_transaction
                                 .$schema_name
                                 .object_and_tag
-                                .remove(&(current_object_id, current_tag_id.clone()));
+                                .remove(&(object.clone(), tag.clone()));
                         }
                         self.database_transaction
                             .$schema_name
