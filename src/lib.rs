@@ -65,10 +65,12 @@ macro_rules! define_index {
         #[derive(Serialize, Deserialize, Debug, Clone)]
         pub struct IndexConfig {
             pub database: lawn_database::DatabaseConfig,
+            pub maintain_only_tag_and_object_table: bool
         }
 
         pub struct Index {
             pub database: lawn_database::Database,
+            pub config: IndexConfig
         }
 
         pub struct ReadTransaction<'a> {
@@ -77,6 +79,7 @@ macro_rules! define_index {
 
         pub struct WriteTransaction<'a, 'b> {
             pub database_transaction: &'a mut lawn_database::WriteTransaction<'b>,
+            pub index_config: &'a IndexConfig
         }
 
         macro_rules! define_read_methods {
@@ -214,10 +217,12 @@ macro_rules! define_index {
                                 .$schema_name
                                 .tag_and_object
                                 .insert((tag.clone(), object.clone()), ());
-                            self.database_transaction
-                                .$schema_name
-                                .object_and_tag
-                                .insert((object.clone(), tag.clone()), ());
+                            if !self.index_config.maintain_only_tag_and_object_table {
+                                self.database_transaction
+                                    .$schema_name
+                                    .object_and_tag
+                                    .insert((object.clone(), tag.clone()), ());
+                            }
                         }
                         self.database_transaction
                             .$schema_name
@@ -232,10 +237,12 @@ macro_rules! define_index {
                                 .$schema_name
                                 .tag_and_object
                                 .remove(&(tag.clone(), object.clone()));
-                            self.database_transaction
-                                .$schema_name
-                                .object_and_tag
-                                .remove(&(object.clone(), tag.clone()));
+                            if !self.index_config.maintain_only_tag_and_object_table {
+                                self.database_transaction
+                                    .$schema_name
+                                    .object_and_tag
+                                    .remove(&(object.clone(), tag.clone()));
+                            }
                         }
                         self.database_transaction
                             .$schema_name
@@ -254,17 +261,21 @@ macro_rules! define_index {
                                 .$schema_name
                                 .tag_and_object
                                 .remove(&(tag.clone(), object.clone()));
-                            self.database_transaction
-                                .$schema_name
-                                .object_and_tag
-                                .remove(&(object.clone(), tag.clone()));
+                            if !self.index_config.maintain_only_tag_and_object_table {
+                                self.database_transaction
+                                    .$schema_name
+                                    .object_and_tag
+                                    .remove(&(object.clone(), tag.clone()));
+                            }
                         }
-                        if self.database_transaction
+                        if (!self.index_config.maintain_only_tag_and_object_table &&
+                            self.database_transaction
                                 .$schema_name
                                 .object_and_tag
                                 .iter(Bound::Included(&(object.clone(), Id::default())), false)?
                                 .take_while(|((object_left, _), _)| Ok(object_left == object))
-                                .next()?.is_none() {
+                                .next()?.is_none())
+                        {
                             self.database_transaction
                                 .$schema_name
                                 .object
@@ -474,6 +485,7 @@ macro_rules! define_index {
             pub fn new(config: IndexConfig) -> Result<Self> {
                 Ok(Self {
                     database: lawn_database::Database::new(config.database.clone()).with_context(|| format!("Can not create dream index using database config {:?}", config.database))?,
+                    config
                 })
             }
 
@@ -485,6 +497,7 @@ macro_rules! define_index {
                     .lock_all_and_write(|database_write_transaction| {
                         f(&mut WriteTransaction {
                             database_transaction: database_write_transaction,
+                            index_config: &self.config
                         })
                     }).with_context(|| "Can not lock lawn database and initiate write transaction")
             }

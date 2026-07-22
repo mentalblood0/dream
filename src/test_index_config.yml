@@ -1,3 +1,4 @@
+maintain_only_tag_and_object_table: false
 database:
   schemas:
     public:

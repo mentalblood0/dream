@@ -5,6 +5,7 @@ objects_count: 100000
 benchmark_in_memory: true
 benchmark_on_disk: true
 index:
+  maintain_only_tag_and_object_table: false
   database:
     log:
       path: /tmp/dream/benchmark/log.dat
